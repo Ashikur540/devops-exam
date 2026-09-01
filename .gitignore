@@ -1,0 +1,14 @@
+.env
+*.env
+.env.*
+node_modules/
+__pycache__/
+*.pyc
+vendor/
+*.log
+.DS_Store
+*.pem
+*.key
+id_rsa*
+.aws/
+exam_token.txt
