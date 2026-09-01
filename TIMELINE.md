@@ -1,11 +1,7 @@
 # Work Timeline
 
-Diary of actual work sessions. Marks are given for this, so keep it honest and
-dated — don't backfill it all at the end.
-
-Format per entry: date, time spent, what you did, what broke, what's next.
-
 ## 2026-09-01
 
 - Read full exam spec, scaffolded repo structure.
-- Next: generate exam token on VPS, start Scenario A (users/groups/ACL).
+- Completed Scenario A1 (users, groups, permissions, ACL for dan, sticky-bit fix for carol, restricted sudo for alice/bob) — time spent: ~2.8 hrs.
+- Next: Scenario A2 (port investigation, A2).
