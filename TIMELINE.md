@@ -5,3 +5,10 @@
 - Read full exam spec, scaffolded repo structure.
 - Completed Scenario A1 (users, groups, permissions, ACL for dan, sticky-bit fix for carol, restricted sudo for alice/bob) — time spent: ~2.8 hrs.
 - Next: Scenario A2 (port investigation, A2).
+
+## 2026-09-02
+
+- Understood the A2.
+- Learned about how to trace the port availability and answered the questions
+- time spent: ~1.5 hrs.
+- Next: Scenario A3 (A3 — A bash script you would actually use).
