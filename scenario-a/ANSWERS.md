@@ -27,3 +27,8 @@ The application was started on port 8080 and was successfully accessed from the 
 However, accessing the server through its public IP address resulted in `Connection refused`. The application was bound to `127.0.0.1`, which means it was listening only on the server's loopback interface and was not accepting connections through the public network interface.
 
 A connection timeout generally means that the connection attempt receives no response, often because traffic is being dropped by a firewall or network security rule. In contrast, `Connection refused` means the host is reachable but the connection was actively rejected, commonly because no service is listening on that address and port or an active rule is rejecting the connection.
+
+### Task 10 — Break it on purpose
+
+1. Pointed the script at a non-existent config file (`does-not-exist.conf`) → exited with code 2, no crash, matches spec.
+2. Added an unresolvable URL (`bad|http://doesnotexist.invalid/|200`) to a copy of `checks.conf` and re-ran with `time`. Script did not hang — finished in ~1.3s (well under the 3s curl `--max-time`), reported it as a normal FAIL (`got 000`), and continued checking the remaining services. No code changes were needed — `curl --max-time 3` already handles this case.
