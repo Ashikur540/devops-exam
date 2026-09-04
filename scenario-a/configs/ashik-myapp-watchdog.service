@@ -1,0 +1,6 @@
+[Unit]
+Description=Ashik myapp watchdog check
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ashik-myapp-watchdog.sh

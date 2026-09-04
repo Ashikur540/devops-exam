@@ -32,3 +32,13 @@ A connection timeout generally means that the connection attempt receives no res
 
 1. Pointed the script at a non-existent config file (`does-not-exist.conf`) → exited with code 2, no crash, matches spec.
 2. Added an unresolvable URL (`bad|http://doesnotexist.invalid/|200`) to a copy of `checks.conf` and re-ran with `time`. Script did not hang — finished in ~1.3s (well under the 3s curl `--max-time`), reported it as a normal FAIL (`got 000`), and continued checking the remaining services. No code changes were needed — `curl --max-time 3` already handles this case.
+
+### Task 13 — Why limit the restarts in production
+
+Without a limit, systemd would restart a crash-looping app forever — burning CPU, filling logs, and hiding a real bug because the service always looks "up" a second later. Marking it `failed` after 5 crashes in 60s stops the noise and forces someone to actually notice and investigate, instead of the process silently flapping in the background indefinitely.
+
+With `Restart=always` and no start limit removed, the same 6-crash test left the service `active (running)` the entire time (restart counter reached 6, no `failed` state ever appeared). In production, `systemctl status` alone would never reveal this — I would need an alert on the restart count / crash rate itself (e.g. a metric on process restarts, or watching journalctl for repeated `Main process exited`/`Scheduled restart job` lines), not just on whether the service is currently "down".
+
+### Task 15 — Why `Restart=on-failure` didn't catch the hang
+
+`Restart=on-failure` only reacts when the process actually exits with a non-zero code. Hitting `/hang` leaves the Node process alive and still listening — it just stops replying to any request — so from systemd's point of view the process never failed, and `Restart=on-failure` has nothing to trigger on. Catching this needed an active check from outside the process (the watchdog timer hitting `/healthz` every 30s and killing/restarting on timeout), not a passive exit-code watcher. Proof: watchdog logged `OK` at 13:45:17, `/hang` was hit at 13:45:30, the next watchdog run at 13:45:47 timed out (no `OK`) and triggered `systemctl restart` — `ashik-myapp.service` shows Stopped/Started at the same second, 13:45:53, and `/healthz` returned `OK` again right after.

@@ -1,0 +1,10 @@
+[Unit]
+Description=Run ashik-myapp watchdog every 30s
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=30s
+Unit=ashik-myapp-watchdog.service
+
+[Install]
+WantedBy=timers.target
