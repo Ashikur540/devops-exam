@@ -81,7 +81,11 @@ Backup/restore: took a `pg_dump -F c` before the `-v` wipe, then after the fresh
 ## B3 — Prometheus + Grafana (Tasks 29-34)
 
 ### Task 29 — Metrics
-_(evidence: `curl :3000/metrics | head -50`)_
+Used `prom-client`. All 6 required metrics wired: `http_requests_total`, `http_request_duration_seconds`, `db_query_duration_seconds`, `db_queries_per_request`, `db_rows_returned`, `http_requests_in_flight`.
+
+`route` label always uses the Express route *pattern* (`req.route.path`, e.g. `/api/notes/:id`), read in the response `finish` handler after Express has matched the route — never the raw URL, to avoid one series per note ID.
+
+Every `db.query()` call now goes through a wrapped `query(req, queryName, sql, params)` in `db.js` that records duration + row count under `queryName`, and increments a per-request counter used for `db_queries_per_request`. Verified locally: `/api/notes?limit=5` → `db_queries_per_request_sum{route="/api/notes"} 7` (1 tenant lookup + 1 page query + 5 tag lookups) vs `/api/search` and `/api/stats` → `2` each — the N+1 is directly visible in the numbers already, before any dashboard.
 
 ### Task 30 — Prometheus wired up
 _(evidence: targets page showing app UP, a query returning data)_

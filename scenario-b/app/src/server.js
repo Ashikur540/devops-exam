@@ -1,14 +1,40 @@
 const express = require('express');
 const db = require('./db');
+const metrics = require('./metrics');
 
 const app = express();
 app.use(express.json());
+
+// Metrics middleware — runs on every request. Reads req.route (the pattern,
+// e.g. '/api/notes/:id', not the real URL) only after the handler ran, in
+// the 'finish' listener, since routing hasn't matched yet when this fires.
+app.use((req, res, next) => {
+  req.dbQueryCount = 0;
+  metrics.httpRequestsInFlight.inc();
+  const endTimer = metrics.httpRequestDuration.startTimer();
+
+  res.on('finish', () => {
+    metrics.httpRequestsInFlight.dec();
+    const route = (req.route && req.route.path) || req.path;
+    const tenant = req.header('X-Tenant') || 'none';
+    endTimer({ route, method: req.method, tenant });
+    metrics.httpRequestsTotal.inc({ route, method: req.method, status: res.statusCode, tenant });
+    metrics.dbQueriesPerRequest.observe({ route }, req.dbQueryCount);
+  });
+
+  next();
+});
+
+app.get('/metrics', async (req, res) => {
+  res.set('Content-Type', metrics.register.contentType);
+  res.end(await metrics.register.metrics());
+});
 
 app.get('/healthz', (req, res) => res.sendStatus(200));
 
 app.get('/readyz', async (req, res) => {
   try {
-    await db.query('SELECT 1');
+    await db.query(req, 'ready_check', 'SELECT 1');
     res.sendStatus(200);
   } catch (err) {
     res.sendStatus(503);
@@ -19,7 +45,7 @@ async function tenantMiddleware(req, res, next) {
   const slug = req.header('X-Tenant');
   if (!slug) return res.status(400).json({ error: 'X-Tenant header required' });
   try {
-    const result = await db.query('SELECT id FROM tenants WHERE slug=$1', [slug]);
+    const result = await db.query(req, 'tenant_lookup', 'SELECT id FROM tenants WHERE slug=$1', [slug]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'unknown tenant' });
     req.tenantId = result.rows[0].id;
     next();
@@ -33,6 +59,8 @@ app.use('/api', tenantMiddleware);
 app.post('/api/notes', async (req, res) => {
   const { title, body } = req.body;
   const result = await db.query(
+    req,
+    'insert_note',
     'INSERT INTO notes (tenant_id, title, body) VALUES ($1,$2,$3) RETURNING *',
     [req.tenantId, title, body]
   );
@@ -48,13 +76,15 @@ app.get('/api/notes', async (req, res) => {
   const offset = (page - 1) * limit;
 
   const notes = await db.query(
+    req,
+    'select_notes_page',
     'SELECT * FROM notes WHERE tenant_id=$1 ORDER BY id LIMIT $2 OFFSET $3',
     [tenantId, limit, offset]
   ); // 1 query
 
   for (const note of notes.rows) {
     // then N more queries
-    const tags = await db.query('SELECT name FROM tags WHERE note_id=$1', [note.id]);
+    const tags = await db.query(req, 'select_tags_by_note', 'SELECT name FROM tags WHERE note_id=$1', [note.id]);
     note.tags = tags.rows.map((t) => t.name);
   }
 
@@ -63,13 +93,15 @@ app.get('/api/notes', async (req, res) => {
 
 app.get('/api/notes/:id', async (req, res) => {
   const result = await db.query(
+    req,
+    'select_note_by_id',
     'SELECT * FROM notes WHERE id=$1 AND tenant_id=$2',
     [req.params.id, req.tenantId]
   );
   if (result.rows.length === 0) return res.sendStatus(404);
 
   const note = result.rows[0];
-  const tags = await db.query('SELECT name FROM tags WHERE note_id=$1', [note.id]);
+  const tags = await db.query(req, 'select_tags_by_note', 'SELECT name FROM tags WHERE note_id=$1', [note.id]);
   note.tags = tags.rows.map((t) => t.name);
   res.json(note);
 });
@@ -78,6 +110,8 @@ app.get('/api/notes/:id', async (req, res) => {
 app.get('/api/search', async (req, res) => {
   const q = req.query.q || '';
   const result = await db.query(
+    req,
+    'search_notes_body_like',
     "SELECT id, title, body FROM notes WHERE tenant_id=$1 AND body LIKE '%' || $2 || '%'",
     [req.tenantId, q]
   );
@@ -87,6 +121,8 @@ app.get('/api/search', async (req, res) => {
 // Problem 3 — no index on tags.note_id makes this join slow at scale.
 app.get('/api/stats', async (req, res) => {
   const result = await db.query(
+    req,
+    'stats_join',
     `SELECT t.slug,
             COUNT(DISTINCT n.id) AS notes,
             COUNT(tg.id) AS tags
@@ -106,7 +142,7 @@ const PORT = process.env.PORT || 3000;
 // `depends_on` (container started) vs "ready" (accepting queries) gap.
 (async () => {
   try {
-    await db.query('SELECT 1');
+    await db.query(null, 'startup_check', 'SELECT 1');
   } catch (err) {
     console.error('startup DB check failed:', err.message);
     process.exit(1);
