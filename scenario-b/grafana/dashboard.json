@@ -1,0 +1,159 @@
+{
+  "id": null,
+  "uid": "ashik-notes-exam",
+  "title": "exam-PASTE_TOKEN",
+  "tags": ["ashik", "notes-api"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "A - Top 5 slowest endpoints (p95 latency)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "ashik-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(5, histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, route)))",
+          "legendFormat": "{{route}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "B - Endpoint consuming most TOTAL time",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "ashik-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(5, sum(rate(http_request_duration_seconds_sum[5m])) by (route))",
+          "legendFormat": "{{route}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "C - Avg + p99 DB query duration by query_name",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "ashik-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(db_query_duration_seconds_sum[5m])) by (query_name) / sum(rate(db_query_duration_seconds_count[5m])) by (query_name)",
+          "legendFormat": "avg {{query_name}}"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.99, sum(rate(db_query_duration_seconds_bucket[5m])) by (le, query_name))",
+          "legendFormat": "p99 {{query_name}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "D - Slowest query (p99) and its frequency",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "ashik-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.99, sum(rate(db_query_duration_seconds_bucket[5m])) by (le, query_name))",
+          "legendFormat": "p99 {{query_name}}"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(db_query_duration_seconds_count[5m])) by (query_name)",
+          "legendFormat": "rate/s {{query_name}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "E - N+1 detector: avg DB queries per request by route",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "ashik-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(db_queries_per_request_sum[5m])) by (route) / sum(rate(db_queries_per_request_count[5m])) by (route)",
+          "legendFormat": "{{route}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "F - Harmful queries over time (slower than threshold)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "ashik-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(db_query_duration_seconds_count[5m])) by (query_name) - sum(rate(db_query_duration_seconds_bucket{le=\"0.1\"}[5m])) by (query_name)",
+          "legendFormat": "{{query_name}} > 100ms/s"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "G - Rows returned distribution (p99) by query_name",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 24, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "ashik-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.99, sum(rate(db_rows_returned_bucket[5m])) by (le, query_name))",
+          "legendFormat": "p99 rows {{query_name}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "H - Error rate + p95 latency by tenant",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 24, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "ashik-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(http_requests_total{status=~\"5..\"}[5m])) by (tenant) / sum(rate(http_requests_total[5m])) by (tenant)",
+          "legendFormat": "error rate {{tenant}}"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, tenant))",
+          "legendFormat": "p95 {{tenant}}"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "I - Saturation: in-flight requests vs latency",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 32, "w": 24, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "ashik-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "http_requests_in_flight",
+          "legendFormat": "in-flight requests"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[1m])) by (le))",
+          "legendFormat": "p95 latency (all routes)"
+        }
+      ]
+    }
+  ]
+}

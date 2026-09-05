@@ -7,13 +7,16 @@ app.use(express.json());
 
 // Metrics middleware — runs on every request. Reads req.route (the pattern,
 // e.g. '/api/notes/:id', not the real URL) only after the handler ran, in
-// the 'finish' listener, since routing hasn't matched yet when this fires.
+// the 'close' listener, since routing hasn't matched yet when this fires.
+// 'close' (not 'finish') because 'finish' never fires if the client
+// disconnects before the response completes - that left in-flight stuck
+// non-zero forever during load testing until this was caught and fixed.
 app.use((req, res, next) => {
   req.dbQueryCount = 0;
   metrics.httpRequestsInFlight.inc();
   const endTimer = metrics.httpRequestDuration.startTimer();
 
-  res.on('finish', () => {
+  res.on('close', () => {
     metrics.httpRequestsInFlight.dec();
     const route = (req.route && req.route.path) || req.path;
     const tenant = req.header('X-Tenant') || 'none';

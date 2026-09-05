@@ -38,6 +38,12 @@ services:
   grafana:
     image: grafana/grafana:latest
     container_name: ashik-notes-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ../grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../grafana/dashboard.json:/etc/grafana/dashboards/dashboard.json:ro
     ports:
       - "3390:3000"
     depends_on:

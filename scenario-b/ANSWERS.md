@@ -96,49 +96,57 @@ _(load script in this folder, tool summary output)_
 ### Task 32 — Dashboard (`exam-<TOKEN>`) — PromQL per panel
 
 **Panel A — Top 5 slowest endpoints (p95)**
-PromQL: `...`
+PromQL: `topk(5, histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, route)))`
 
 **Panel B — Endpoint consuming most TOTAL time**
-PromQL: `...`
-Which endpoint wins Panel A vs Panel B, and why are they different?
+PromQL: `topk(5, sum(rate(http_request_duration_seconds_sum[5m])) by (route))`
+Which endpoint wins Panel A vs Panel B, and why are they different? _(filled in after the final load run — see below.)_
 
 > 
 
 **Panel C — Avg + p99 DB query duration by query name**
-PromQL: `...`
+PromQL avg: `sum(rate(db_query_duration_seconds_sum[5m])) by (query_name) / sum(rate(db_query_duration_seconds_count[5m])) by (query_name)`
+PromQL p99: `histogram_quantile(0.99, sum(rate(db_query_duration_seconds_bucket[5m])) by (le, query_name))`
 
 **Panel D — Slowest single query + frequency**
-PromQL: `...`
+PromQL p99: `histogram_quantile(0.99, sum(rate(db_query_duration_seconds_bucket[5m])) by (le, query_name))`
+PromQL frequency: `sum(rate(db_query_duration_seconds_count[5m])) by (query_name)`
 Which query is slowest — is it also the most frequent?
 
 > 
 
-**Panel E — N+1 detector (queries per request)**
-PromQL: `...`
+**Panel E — N+1 detector (avg DB queries per request by route)**
+PromQL: `sum(rate(db_queries_per_request_sum[5m])) by (route) / sum(rate(db_queries_per_request_count[5m])) by (route)`
+Confirmed during dev testing: `/api/notes` averaged **133 queries/request** during the load test (heavy-tenant `limit=5000` requests mean up to 5000 tag lookups for one request), vs `2` for `/api/search`, `/api/stats`, and `~2.2` for `/api/notes/:id`.
 
 **Panel F — Harmful queries over time (threshold)**
-PromQL: `...`
+PromQL: `sum(rate(db_query_duration_seconds_count[5m])) by (query_name) - sum(rate(db_query_duration_seconds_bucket{le="0.1"}[5m])) by (query_name)`
 Threshold chosen and why (base it on your own Panel C data, not a round number):
 
 > 
 
 **Panel G — Rows returned distribution**
-PromQL: `...`
+PromQL: `histogram_quantile(0.99, sum(rate(db_rows_returned_bucket[5m])) by (le, query_name))`
+Confirmed during dev testing: `select_notes_page` p99 rows returned = **~4140** (driven entirely by the heavy tenant's `?limit=5000` requests — Problem 4, unbounded limit, made directly visible).
 What max limit would you set, and what should the API do when a client asks for more?
 
 > 
 
 **Panel H — Error rate + p95 latency by tenant**
-PromQL: `...`
+PromQL error rate: `sum(rate(http_requests_total{status=~"5.."}[5m])) by (tenant) / sum(rate(http_requests_total[5m])) by (tenant)`
+PromQL p95: `histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, tenant))`
 Which tenant looks worse, and is it more data or heavier requests? Prove it.
 
 > 
 
 **Panel I — In-flight requests vs latency (saturation)**
-PromQL: `...`
+PromQL in-flight: `http_requests_in_flight`
+PromQL p95: `histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[1m])) by (le))`
 Did latency rise at the same time as concurrency, or was there a delay? What does that tell you about the bottleneck?
 
 > 
+
+**Bug found and fixed while building this panel:** `http_requests_in_flight` got stuck at a high number (129) after the first load test and never came back down, even once the app was idle again. Cause: the metrics middleware decremented the gauge on the Express `res.on('finish')` event, but `finish` never fires if the client disconnects before the response completes — which is exactly what happened when curl processes got killed mid-request during the load test (see Task 31 notes). Fixed by switching to `res.on('close')`, which Node guarantees fires exactly once whether the response completed normally or the connection was aborted early. Re-verified: gauge correctly returned to a small number after the fix, instead of drifting upward forever — a saturation gauge that only ever goes up is worse than useless in production, it actively hides real recovery.
 
 _(dashboard JSON exported to `scenario-b/grafana/dashboard.json`)_
 
@@ -152,18 +160,19 @@ Threshold chosen and why (base on your normal p95 from Panel A):
 > 
 
 ### Task 34 — Fix one problem
-Which problem did you fix?
+Fixed **Problem 3 — missing FK index on `tags.note_id`**: `CREATE INDEX idx_tags_note_id ON tags(note_id);`
 
-> 
+`EXPLAIN ANALYZE` before/after (see `evidence/`):
+- The `/api/stats` join itself barely changed (88.75ms → 79.72ms) — Postgres's planner correctly chose a sequential scan + hash join either way, because that query touches almost the entire `tags` table regardless of an index. An index doesn't help when you're reading most of the table.
+- The query that actually matters — `SELECT name FROM tags WHERE note_id = $1`, the one run once per note inside the N+1 loop — went from **Seq Scan, 3.36ms** (scanning all 150,000 rows, filtering out 149,999) to **Bitmap Index Scan, 0.076ms**: a **~44x speedup** on a point lookup. Since this query runs once per note (up to 5,000 times for the heavy tenant's `?limit=5000` requests), the real-world win is on the order of seconds of DB time saved per request, not milliseconds.
 
-`EXPLAIN ANALYZE` before/after — see evidence/.
-What did the fix cost (index size / write speed measured)?
-
-> 
+What did the fix cost?
+- Index size: `pg_size_pretty(pg_relation_size('idx_tags_note_id'))` → **2144 kB** for 150,000 rows.
+- Write cost: 3 clean `INSERT` timings without the index averaged **~0.89ms**; with the index, **~1.0ms** — a small, real overhead (~10-15%) from B-tree maintenance on every insert, not free, but easily worth it at this table's read/write ratio.
 
 Which problem would you fix next, and what would you need to measure first?
 
-> 
+> The N+1 query (Problem 1) — it's the biggest live cost by far (Panel E showed `/api/notes` averaging ~133 DB queries per request under load). Before fixing it I'd want Panel B (total time consumed) to confirm `/api/notes`/`select_tags_by_note` really is where the server's aggregate time is going (not just a high per-request count that's individually cheap) — then replace the loop with one `SELECT name, note_id FROM tags WHERE note_id = ANY($1)` and compare `db_queries_per_request` and Panel B before/after.
 
 ---
 
