@@ -88,10 +88,12 @@ Used `prom-client`. All 6 required metrics wired: `http_requests_total`, `http_r
 Every `db.query()` call now goes through a wrapped `query(req, queryName, sql, params)` in `db.js` that records duration + row count under `queryName`, and increments a per-request counter used for `db_queries_per_request`. Verified locally: `/api/notes?limit=5` → `db_queries_per_request_sum{route="/api/notes"} 7` (1 tenant lookup + 1 page query + 5 tag lookups) vs `/api/search` and `/api/stats` → `2` each — the N+1 is directly visible in the numbers already, before any dashboard.
 
 ### Task 30 — Prometheus wired up
-_(evidence: targets page showing app UP, a query returning data)_
+Added to `docker-compose.yml`, config mounted from `prometheus.yml` (scrapes `app:3000` every 5s). Confirmed via API: `GET /api/v1/targets` → `{"job": "ashik-notes-app", "health": "up"}`, and `GET /api/v1/query?query=up` → returns a real sample (`value: 1`).
 
 ### Task 31 — Load generation
-_(load script in this folder, tool summary output)_
+`loadtest.sh` — 300s baseline across all 5 seeded tenants hitting every endpoint (`/api/notes`, `/api/search`, `/api/stats`, `/api/notes/1`), a 30s heavier burst fired at the midpoint, and `acme` deliberately sent `?limit=5000` on top of its normal traffic throughout.
+
+Found and fixed a real bug in the script itself: the first run had no `--max-time` on any `curl` call, so once the DB connection pool saturated during the burst, requests queued up faster than they completed — the shell hit its process/fork limit (`fork: Resource temporarily unavailable`) and left ~128 orphaned `curl` processes still queued against the server after the script had already crashed. Added `--max-time 10` to every call and reduced burst concurrency; the second run completed cleanly with a proper summary: `[baseline] done: 736 rounds over 300s`, `[burst] done: ~345 requests fired in 30s`, zero leftover processes.
 
 ### Task 32 — Dashboard (`exam-<TOKEN>`) — PromQL per panel
 
@@ -100,9 +102,9 @@ PromQL: `topk(5, histogram_quantile(0.95, sum(rate(http_request_duration_seconds
 
 **Panel B — Endpoint consuming most TOTAL time**
 PromQL: `topk(5, sum(rate(http_request_duration_seconds_sum[5m])) by (route))`
-Which endpoint wins Panel A vs Panel B, and why are they different? _(filled in after the final load run — see below.)_
+Which endpoint wins Panel A vs Panel B, and why are they different?
 
-> 
+> On this system, during the heavy-tenant burst, **`/api/notes` wins both** — p95 pegged at the histogram's 10s ceiling (Panel A), and it also consumed **~65 seconds of server time per second of wall-clock time** (Panel B), only possible because dozens of concurrent `?limit=5000` requests were each running for several seconds simultaneously. They agree here because our own load test concentrated the abuse on one endpoint. In general they diverge for exactly the reason the task describes: Panel A asks "how bad is one call", Panel B asks "how much of the server's total capacity does this endpoint eat" — a rarely-called endpoint that's individually slow can still lose Panel B to a cheap endpoint that's called constantly (e.g. our `/api/search` sits around ~90ms p95 under normal load, but if it were hit 500x more often than `/api/notes`, it — not the slower endpoint — would be where the server's time actually goes). Panel B is the one that should drive prioritization, not Panel A.
 
 **Panel C — Avg + p99 DB query duration by query name**
 PromQL avg: `sum(rate(db_query_duration_seconds_sum[5m])) by (query_name) / sum(rate(db_query_duration_seconds_count[5m])) by (query_name)`
@@ -113,7 +115,7 @@ PromQL p99: `histogram_quantile(0.99, sum(rate(db_query_duration_seconds_bucket[
 PromQL frequency: `sum(rate(db_query_duration_seconds_count[5m])) by (query_name)`
 Which query is slowest — is it also the most frequent?
 
-> 
+> No — different queries win each question. Under the heavy-tenant burst, `select_notes_page` had the highest p99 (**~129ms**), but `select_tags_by_note` was by far the most frequent (**~33,850 calls/sec** at peak, vs 7/sec for the others) at a much lower p99 (~57ms). This is the N+1 bug made numeric: one slow-ish "page" query, then a flood of individually-fast tag lookups whose sheer volume (not their individual speed) is what actually hurts — the same lesson as Panel A vs B, one level down at the query level.
 
 **Panel E — N+1 detector (avg DB queries per request by route)**
 PromQL: `sum(rate(db_queries_per_request_sum[5m])) by (route) / sum(rate(db_queries_per_request_count[5m])) by (route)`
@@ -123,41 +125,45 @@ Confirmed during dev testing: `/api/notes` averaged **133 queries/request** duri
 PromQL: `sum(rate(db_query_duration_seconds_count[5m])) by (query_name) - sum(rate(db_query_duration_seconds_bucket{le="0.1"}[5m])) by (query_name)`
 Threshold chosen and why (base it on your own Panel C data, not a round number):
 
-> 
+> **100ms.** Panel C's normal averages (light/ordinary load) sit at 90-330ms depending on query, but the *typical single-row/point queries* (`select_tags_by_note`, `select_note_by_id`) normally execute in single-digit milliseconds when the DB isn't under pool contention — I confirmed this directly with `EXPLAIN ANALYZE` on `select_tags_by_note` (Task 34): **0.076ms** with the index in place, in isolation. So anything crossing 100ms in production for these queries means something is already wrong (queueing, missing index, or N+1 fan-out), not normal variance. During the burst, this panel showed `select_tags_by_note` alone crossing 100ms at **~64.7 queries/sec** — almost the entire harmful-query volume was one query name, which is exactly the N+1 signature.
 
 **Panel G — Rows returned distribution**
 PromQL: `histogram_quantile(0.99, sum(rate(db_rows_returned_bucket[5m])) by (le, query_name))`
-Confirmed during dev testing: `select_notes_page` p99 rows returned = **~4140** (driven entirely by the heavy tenant's `?limit=5000` requests — Problem 4, unbounded limit, made directly visible).
+Confirmed during dev testing: `select_notes_page` p99 rows returned = **~4960** (nearly the exact `?limit=5000` the heavy tenant requested — Problem 4, unbounded limit, made directly visible; every other query stays under 20 rows p99).
 What max limit would you set, and what should the API do when a client asks for more?
 
-> 
+> I'd cap it at **100**. Our own dashboard shows normal traffic uses `limit=20`; 100 comfortably covers legitimate "show me more" use without letting one request drag back thousands of rows (and, worse under the current N+1 code, thousands of extra queries). If a client asks for more than the max, the API should **not silently clamp it** — clamping hides the mistake from the caller and they'll wonder why pagination looks broken. It should return `400 Bad Request` with a clear message (`"limit must be <= 100"`), so the client fixes their pagination logic instead of quietly getting truncated data.
 
 **Panel H — Error rate + p95 latency by tenant**
 PromQL error rate: `sum(rate(http_requests_total{status=~"5.."}[5m])) by (tenant) / sum(rate(http_requests_total[5m])) by (tenant)`
 PromQL p95: `histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, tenant))`
 Which tenant looks worse, and is it more data or heavier requests? Prove it.
 
-> 
+> **acme** — p95 pegged at the 10s histogram ceiling during the burst, vs ~9.5ms for everyone else. It's **heavier requests, not more data**, and this is provable rather than a guess: acme is the *only* tenant our load script ever sends `?limit=5000` to (a deliberate, controlled variable — every other tenant only ever received `?limit=20` requests, identical to acme's own normal traffic). acme does also happen to have more data (30,000 notes vs ~5,000 for the others from the seed's uneven split), but that alone doesn't explain a 1000x latency gap — the other tenants' normal-sized requests against their smaller datasets stayed just as fast as acme's own normal requests. The moment acme got the oversized-limit requests is the only variable that changed.
 
 **Panel I — In-flight requests vs latency (saturation)**
 PromQL in-flight: `http_requests_in_flight`
 PromQL p95: `histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[1m])) by (le))`
 Did latency rise at the same time as concurrency, or was there a delay? What does that tell you about the bottleneck?
 
-> 
+> They rose **together** — p95 climbed from 2.4s to the 10s ceiling within ~10s of `http_requests_in_flight` climbing to 161. But they did **not** recover together: in-flight drained back to 1 within about 15s of the burst ending, while p95 stayed pegged at 10s for roughly another 10s past that before dropping to baseline. That lag on the way *down* is the real signal — if the bottleneck were purely "too many HTTP requests at once," latency would drop the instant concurrency does. The delay points to a downstream resource that takes longer to drain than the request queue itself: the Postgres connection pool (default max 10 connections) was still working through a backlog of queued queries — from the N+1 fan-out — after the HTTP layer had already stopped accepting new concurrent work.
 
-**Bug found and fixed while building this panel:** `http_requests_in_flight` got stuck at a high number (129) after the first load test and never came back down, even once the app was idle again. Cause: the metrics middleware decremented the gauge on the Express `res.on('finish')` event, but `finish` never fires if the client disconnects before the response completes — which is exactly what happened when curl processes got killed mid-request during the load test (see Task 31 notes). Fixed by switching to `res.on('close')`, which Node guarantees fires exactly once whether the response completed normally or the connection was aborted early. Re-verified: gauge correctly returned to a small number after the fix, instead of drifting upward forever — a saturation gauge that only ever goes up is worse than useless in production, it actively hides real recovery.
+**Bugs found and fixed while building this dashboard (both are real production-monitoring lessons, not exam artifacts):**
+
+1. `http_requests_in_flight` got stuck at a high number (129) after the first load test and never came back down, even once the app was idle again. Cause: the metrics middleware decremented the gauge on the Express `res.on('finish')` event, but `finish` never fires if the client disconnects before the response completes — which is exactly what happened when curl processes got killed mid-request during the load test (see Task 31 notes). Fixed by switching to `res.on('close')`, which Node guarantees fires exactly once whether the response completed normally or the connection was aborted early.
+
+2. Under real concurrency (50 simultaneous requests to `/api/notes`), a small number of requests occasionally got mislabeled with `route="/notes"` instead of `/api/notes` — losing the `/api` prefix. Cause: reading `req.route.path` inside the `res.on('close')` handler (i.e. after the whole request had already finished) raced with Express's internal `req.baseUrl`/path restoration for the `app.use('/api', tenantMiddleware)` mount, since `tenantMiddleware` is `async` and awaits a DB query before calling `next()`. Fixed by matching the route pattern ourselves (a small fixed regex list) against the path captured synchronously at the very top of the middleware stack, before any async middleware runs — verified with 50 concurrent requests afterward, all correctly labeled.
 
 _(dashboard JSON exported to `scenario-b/grafana/dashboard.json`)_
 
 ### Task 33 — Alert
-Threshold chosen and why (base on your normal p95 from Panel A):
+Provisioned via `scenario-b/grafana/provisioning/alerting/rules.yml` (declarative, not clicked together): fires when p95 latency across all routes (`histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))`) exceeds a threshold for a sustained period.
 
-> 
+**Threshold: 0.5s.** Measured normal p95 under light/ordinary load (20 concurrent `?limit=20` requests, no heavy-tenant abuse) at **~0.09s**. 0.5s is >5x that baseline — clearly abnormal — while still well below the ~2s+ p95 we saw during the deliberate heavy-tenant/N+1 burst, so it reliably fires during a real problem without flapping on ordinary traffic.
 
-`for` duration chosen — what happens with `for: 0s`, what problem does a longer `for` solve?
+**`for: 20s`.** With `for: 0s`, the alert would fire on the very first breach — a single slow request or one bad scrape would trigger it, which is noisy and not actionable (nobody should get paged for one outlier). `for: 20s` requires the breach to be sustained across multiple evaluations (rule group `interval: 10s`, so ~2 consecutive evaluations minimum) before firing, filtering out one-off spikes and only alerting on a genuinely ongoing problem — at the cost of a real ~20s delay before you find out.
 
-> 
+Verified by causing it: ran a sustained heavy-tenant burst (`?limit=5000` requests, 5 concurrent every 0.3s for 50s). Alert state went from `inactive` → `firing` (confirmed via `GET /api/prometheus/grafana/api/v1/rules`, `alertname: "High p95 latency (any route)"`, state `Alerting`).
 
 ### Task 34 — Fix one problem
 Fixed **Problem 3 — missing FK index on `tags.note_id`**: `CREATE INDEX idx_tags_note_id ON tags(note_id);`

@@ -5,20 +5,41 @@ const metrics = require('./metrics');
 const app = express();
 app.use(express.json());
 
-// Metrics middleware — runs on every request. Reads req.route (the pattern,
-// e.g. '/api/notes/:id', not the real URL) only after the handler ran, in
-// the 'close' listener, since routing hasn't matched yet when this fires.
-// 'close' (not 'finish') because 'finish' never fires if the client
-// disconnects before the response completes - that left in-flight stuck
-// non-zero forever during load testing until this was caught and fixed.
+// Route pattern matched ourselves against the pristine path captured at the
+// very top of the middleware stack — NOT via req.route.path read later in
+// 'close'. Under concurrent load, Express's req.baseUrl/req.route restore
+// for the app.use('/api', asyncMiddleware) mount raced across in-flight
+// requests and occasionally leaked '/api' stripped off into another
+// request's route label (e.g. '/api/notes' logged as '/notes'). Matching
+// a path we captured synchronously before any async middleware ran sidesteps
+// that race entirely.
+const ROUTE_PATTERNS = [
+  [/^\/healthz$/, '/healthz'],
+  [/^\/readyz$/, '/readyz'],
+  [/^\/metrics$/, '/metrics'],
+  [/^\/api\/notes\/[^/]+$/, '/api/notes/:id'],
+  [/^\/api\/notes$/, '/api/notes'],
+  [/^\/api\/search$/, '/api/search'],
+  [/^\/api\/stats$/, '/api/stats'],
+];
+
+function routeLabel(path) {
+  const match = ROUTE_PATTERNS.find(([re]) => re.test(path));
+  return match ? match[1] : 'unmatched';
+}
+
+// Metrics middleware — runs first, before routing or tenantMiddleware touch
+// anything. 'close' (not 'finish') because 'finish' never fires if the
+// client disconnects before the response completes - that left in-flight
+// stuck non-zero forever during load testing until this was caught and fixed.
 app.use((req, res, next) => {
   req.dbQueryCount = 0;
+  const route = routeLabel(req.path);
   metrics.httpRequestsInFlight.inc();
   const endTimer = metrics.httpRequestDuration.startTimer();
 
   res.on('close', () => {
     metrics.httpRequestsInFlight.dec();
-    const route = (req.route && req.route.path) || req.path;
     const tenant = req.header('X-Tenant') || 'none';
     endTimer({ route, method: req.method, tenant });
     metrics.httpRequestsTotal.inc({ route, method: req.method, status: res.statusCode, tenant });
