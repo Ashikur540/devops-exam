@@ -51,31 +51,30 @@ Backup/restore: took a `pg_dump -F c` before the `-v` wipe, then after the fresh
 ### Task 28 — Debugging drill (2 marks each)
 
 **a. Exit code 137**
-- What you changed to cause it:
-- Symptom:
-- Command that revealed the cause:
-- Fix:
+- What you changed to cause it: ran a container with `--memory=50m` and had it allocate a huge array (`python -c "x=[0]*100000000"`).
+- Symptom: process killed, exit code `137`.
+- Command that revealed the cause: `docker inspect --format='{{.State.OOMKilled}}' <container>` → `true`. `137 = 128 + 9` (SIGKILL) — combined with `OOMKilled: true` that's the kernel's OOM killer, not the app crashing on its own (which would look like a normal non-zero exit, and a graceful stop asked via SIGTERM would show `143` instead).
+- Fix: raise the memory limit to what the workload actually needs, or fix the code causing unbounded memory growth — a limit is a safety net, not something to just keep raising.
 
 **b. Can't reach DB by service name, can by IP**
-- What you changed to cause it:
-- Symptom:
-- Command that revealed the cause:
-- Fix:
+- What you changed to cause it: ran a plain `busybox` container via `docker run` (default bridge network) while postgres lives on the compose project's own `docker_default` network — two different Docker networks.
+- Symptom: `nslookup postgres` from the busybox container → `NXDOMAIN`.
+- Command that revealed the cause: `docker network ls` (showed `docker_default` as a separate network from `bridge`), `docker inspect <container> --format '{{json .NetworkSettings.Networks}}'`.
+- Fix: put both containers on the same user-defined network (`docker network connect docker_default <container>`, or just let compose manage both — which is what our real `docker-compose.yml` already does).
+- Note: on this Mac (Docker Desktop) even a raw IP connection across the two networks timed out — Docker Desktop's networking isolates user-defined bridges from each other more strictly than a plain Linux Docker Engine typically does, so "DNS fails, IP works" (as worded in the task) didn't fully reproduce here. Re-verified this drill against the real Linux Docker on the VPS for final evidence, where standard bridge routing applies.
 
 **c. Volume mounted but app sees empty directory**
-- What you changed to cause it:
-- Symptom:
-- Command that revealed the cause:
-- Fix:
-- How do named volumes behave differently on first creation?
-
-> 
+- What you changed to cause it: added a bind mount `./ashik-empty-folder:/app/node_modules` on the app service — an empty host folder over the path where the image already has `node_modules` installed.
+- Symptom: `require('express')` → `Error: Cannot find module 'express'` / `MODULE_NOT_FOUND`.
+- Command that revealed the cause: `docker run ... ls -la /app/node_modules` → empty directory (just `.` and `..`).
+- Fix: don't bind-mount over a path the image populates — mount the source code directory instead (e.g. `./src:/app/src`) and let `node_modules` come from the image, or use a named volume seeded via an entrypoint step if you truly need host-editable deps.
+- How do named volumes behave differently on first creation? A **bind mount** always shows exactly what's on the host (empty folder → empty mount, hiding the image's contents). A **named volume** that has never been used before is initialized by Docker with a *copy* of whatever was already at that path in the image — so `- node_modules:/app/node_modules` (named volume, first run) would actually preserve the image's installed packages, while the bind mount above wipes them out of view.
 
 **d. Port published but connection refused from host**
-- What you changed to cause it:
-- Symptom:
-- Command that revealed the cause:
-- Fix:
+- What you changed to cause it: changed `app.listen(PORT, ...)` to `app.listen(PORT, '127.0.0.1', ...)` — binds only to the loopback interface inside the container instead of all interfaces.
+- Symptom: `docker ps` shows the port mapping fine (`0.0.0.0:8377->3000/tcp`), but `curl http://localhost:8377/healthz` from the host fails (`Connection reset by peer`), while `docker exec <container> wget -qO- http://127.0.0.1:3000/healthz` from *inside* the container returns `OK`.
+- Command that revealed the cause: comparing the curl-from-host result against `docker exec ... wget 127.0.0.1:...` — same app, different reachability depending on which network namespace you're in.
+- Fix: bind to `0.0.0.0` (or omit the host argument — Node's `http.Server.listen(port)` already defaults to all interfaces). Docker's port publishing forwards host traffic to the container's own network interface, not to its loopback, so an app listening only on `127.0.0.1` inside the container is unreachable from outside no matter what port mapping is configured.
 
 ---
 
