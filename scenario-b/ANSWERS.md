@@ -5,29 +5,32 @@ Exam token used in this scenario's screenshots: `PASTE_TOKEN`
 ## B1 — Docker image (Tasks 21-25)
 
 ### Task 21 — Multi-stage Dockerfile
-_(evidence: non-root `whoami`/`id`, healthcheck showing `(healthy)`)_
+Builder stage (`node:20-alpine`) installs prod-only deps (`npm ci --omit=dev`); final stage copies just `node_modules`, `package.json`, `src` — no npm cache, no lockfile, no build tools. Runs as the `node` user (built into the base image, no need to create one). `HEALTHCHECK` uses `wget --spider` against `/healthz` (busybox `wget` already ships in alpine, no extra package needed).
+
+Verified locally: `whoami` → `node` (not root), `id` → `uid=1000(node)`, container status shows `(healthy)` after ~12s.
 
 ### Task 22 — Size comparison
-What did you remove going from `Dockerfile.naive` to multi-stage, and what did you give up by removing it?
+Removed going from naive → multi-stage:
+- Full Debian-based `node:20` image → `node:20-alpine`
+- `npm install` (installs devDependencies) → `npm ci --omit=dev` (prod-only, reproducible from lockfile)
+- Build-stage-only files (npm cache, `package-lock.json`, anything not under `src/`) never copied into the final stage
 
-> 
+What we gave up: convenience tools that come with the full Debian image (bash extras, apt, easy `apt install` for ad-hoc debugging inside the container) — for a production image that's an acceptable trade, since debugging should happen via logs/exec into a separate debug image, not by installing tools into the running container.
 
-Naive size: ___  Multi-stage size: ___  (must be ≥60% smaller)
+Naive size: **1.59GB**  Multi-stage size: **200MB** — **~87% smaller** (target was ≥60%).
 
 ### Task 23 — Layer caching
-Which layers were rebuilt after changing one source line, and why?
-
-> 
+Changed one comment line in `src/server.js`, reran `docker build`. `COPY package*.json` and `RUN npm ci --omit=dev` stayed `CACHED` (their inputs — `package.json`/`package-lock.json` — didn't change). Only `COPY src ./src` (in both the builder and final stage) re-ran, because that layer's input is the source tree we just touched. This is why `package*.json` is copied and installed *before* `COPY src` — dependency installs are the expensive step and should only re-run when dependencies actually change.
 
 ### Task 24 — Biggest layer
-Which layer is biggest, what command created it, could it be smaller?
-
-> 
+Biggest layer overall is **130MB**, from the base `node:20-alpine` image itself (`addgroup/adduser` + Node.js binary install via `apk`/curl) — this is inherited from the official image, not something our Dockerfile creates. Of the layers our own Dockerfile adds, the biggest is `COPY node_modules` at **5.61MB**. Could it be smaller? Only by trimming dependencies further (we only depend on `express`+`pg`, already minimal) or switching to a smaller base like `node:20-alpine` → a distroless Node image, which trades away shell/package-manager access entirely.
 
 ### Task 25 — Secrets in image layers
-Why doesn't `rm` in a later layer remove the file from earlier layers?
+Built a throwaway `Dockerfile.secrets-trap` reproducing the exact trap (`COPY .env` → `cat` → `rm`). Confirmed two things:
+1. Inside the final container, `find / -name ".env"` returns **nothing** — looks clean.
+2. Exported the image (`docker save` → OCI tar), searched the individual layer blobs, and found `.env` still present with its full plaintext (`DB_PASSWORD=supersecret12345`, `API_KEY=...`) inside the `COPY .env` layer's blob.
 
-> 
+Why `rm` doesn't help: each Dockerfile instruction creates its own immutable layer (image = a stack of layer diffs). `rm` in a later layer only adds a "this file is deleted" marker (a whiteout) on top — it doesn't rewrite or delete the earlier layer's data. Anyone who pulls the image gets every layer, including the one with the secret, and can extract it directly without ever running the container. The real fix: never `COPY` secrets into a build context at all — use build secrets (`docker build --secret`) or inject at runtime via env vars/mounted volumes.
 
 ---
 
