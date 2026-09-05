@@ -57,11 +57,11 @@ Backup/restore: took a `pg_dump -F c` before the `-v` wipe, then after the fresh
 - Fix: raise the memory limit to what the workload actually needs, or fix the code causing unbounded memory growth — a limit is a safety net, not something to just keep raising.
 
 **b. Can't reach DB by service name, can by IP**
-- What you changed to cause it: ran a plain `busybox` container via `docker run` (default bridge network) while postgres lives on the compose project's own `docker_default` network — two different Docker networks.
-- Symptom: `nslookup postgres` from the busybox container → `NXDOMAIN`.
-- Command that revealed the cause: `docker network ls` (showed `docker_default` as a separate network from `bridge`), `docker inspect <container> --format '{{json .NetworkSettings.Networks}}'`.
-- Fix: put both containers on the same user-defined network (`docker network connect docker_default <container>`, or just let compose manage both — which is what our real `docker-compose.yml` already does).
-- Note: on this Mac (Docker Desktop) even a raw IP connection across the two networks timed out — Docker Desktop's networking isolates user-defined bridges from each other more strictly than a plain Linux Docker Engine typically does, so "DNS fails, IP works" (as worded in the task) didn't fully reproduce here. Re-verified this drill against the real Linux Docker on the VPS for final evidence, where standard bridge routing applies.
+- What you changed to cause it: ran a plain `busybox` container via `docker run` (lands on the default `bridge` network) while postgres runs in our compose project's own `ashik-notes-b_default` network — two different Docker networks, exactly as the task suggests trying.
+- Symptom: `nslookup ashik-notes-postgres` from the busybox container → `NXDOMAIN`.
+- Command that revealed the cause: `docker network ls` (many separate networks listed, one per project/student on this shared VPS — `ashik-notes-b_default` is its own, distinct from `bridge`), `docker inspect <container> --format '{{index .NetworkSettings.Networks "ashik-notes-b_default" "IPAddress"}}'` (note: `docker inspect`'s Go template needs `index ... "key"` instead of dot-access when the network name itself contains hyphens, like ours does — `.Networks.ashik-notes-b_default` fails to parse).
+- **Real finding on this VPS (Docker 29.7.2):** a raw IP connection (`nc -zv <ip> 5432`) across the two networks also timed out — not just the DNS lookup. This contradicts the task's own wording ("ping the IP works"), which describes older Docker behavior. Current Docker isolates the default `bridge` network from user-defined networks at the routing level too, not only at DNS — verified identically on both this VPS and a separate Mac Docker Desktop test, so it's a real current-Docker behavior change, not an environment quirk.
+- Fix: `docker network connect ashik-notes-b_default <container>` — put both containers on the same network. Verified after: `nslookup` now resolves `ashik-notes-postgres` to its IP, and the same `nc` command that timed out before now reports the port `open`.
 
 **c. Volume mounted but app sees empty directory**
 - What you changed to cause it: added a bind mount `./ashik-empty-folder:/app/node_modules` on the app service — an empty host folder over the path where the image already has `node_modules` installed.

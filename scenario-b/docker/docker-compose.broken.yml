@@ -1,3 +1,5 @@
+name: ashik-notes-b-broken
+
 services:
   postgres:
     image: postgres:16-alpine
