@@ -8,20 +8,20 @@ groups:
       - uid: ashik-p95-latency-alert
         title: High p95 latency (any route)
         condition: C
-        for: 20s
+        for: 15s
         noDataState: NoData
         execErrState: Error
         labels: {}
         annotations:
-          summary: 'p95 latency across all routes exceeded 0.5s for 20s'
+          summary: 'p95 latency across all routes exceeded 0.07s for 15s'
         data:
           - refId: A
             relativeTimeRange:
-              from: 300
+              from: 60
               to: 0
             datasourceUid: ashik-prometheus
             model:
-              expr: 'histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))'
+              expr: 'histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[1m])) by (le))'
               intervalMs: 1000
               maxDataPoints: 43200
               refId: A
@@ -40,5 +40,5 @@ groups:
               conditions:
                 - evaluator:
                     type: gt
-                    params: [0.5]
+                    params: [0.07]
               refId: C
