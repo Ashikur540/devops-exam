@@ -1,6 +1,6 @@
 # Scenario B — Containerize, Ship and Observe — Answers
 
-Exam token used in this scenario's screenshots: `PASTE_TOKEN`
+Exam token used in this scenario's screenshots: `ashik-devops-vmi3536696-1788500224-d4790b52`
 
 ## B1 — Docker image (Tasks 21-25)
 
@@ -17,7 +17,7 @@ Removed going from naive → multi-stage:
 
 What we gave up: convenience tools that come with the full Debian image (bash extras, apt, easy `apt install` for ad-hoc debugging inside the container) — for a production image that's an acceptable trade, since debugging should happen via logs/exec into a separate debug image, not by installing tools into the running container.
 
-Naive size: **1.59GB**  Multi-stage size: **200MB** — **~87% smaller** (target was ≥60%).
+Naive size: **1.6GB**  Multi-stage size: **207MB** — **~87% smaller** (target was ≥60%). (Dev-machine test earlier showed 1.59GB/200MB; VPS numbers above are the official evidence.)
 
 ### Task 23 — Layer caching
 Changed one comment line in `src/server.js`, reran `docker build`. `COPY package*.json` and `RUN npm ci --omit=dev` stayed `CACHED` (their inputs — `package.json`/`package-lock.json` — didn't change). Only `COPY src ./src` (in both the builder and final stage) re-ran, because that layer's input is the source tree we just touched. This is why `package*.json` is copied and installed *before* `COPY src` — dependency installs are the expensive step and should only re-run when dependencies actually change.
