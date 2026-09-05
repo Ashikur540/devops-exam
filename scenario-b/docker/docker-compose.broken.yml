@@ -1,0 +1,23 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ashik-notes-postgres-broken
+    environment:
+      POSTGRES_DB: notes
+      POSTGRES_PASSWORD: notespass
+    volumes:
+      - ashik-notes-pgdata-broken:/var/lib/postgresql/data
+
+  app:
+    build: ../app
+    container_name: ashik-notes-app-broken
+    environment:
+      DATABASE_URL: postgresql://postgres:notespass@postgres:5432/notes
+      PORT: 3000
+    ports:
+      - "8301:3000"
+    depends_on:
+      - postgres
+
+volumes:
+  ashik-notes-pgdata-broken:

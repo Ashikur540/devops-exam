@@ -101,4 +101,15 @@ app.get('/api/stats', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`listening on ${PORT}`));
+
+// Fail fast if the DB isn't reachable yet — this is what exposes the
+// `depends_on` (container started) vs "ready" (accepting queries) gap.
+(async () => {
+  try {
+    await db.query('SELECT 1');
+  } catch (err) {
+    console.error('startup DB check failed:', err.message);
+    process.exit(1);
+  }
+  app.listen(PORT, () => console.log(`listening on ${PORT}`));
+})();

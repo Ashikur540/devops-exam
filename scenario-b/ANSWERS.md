@@ -37,14 +37,16 @@ Why `rm` doesn't help: each Dockerfile instruction creates its own immutable lay
 ## B2 — Compose, storage, debugging (Tasks 26-28)
 
 ### Task 26 — depends_on vs actually ready
-_(evidence: crash with only `depends_on`, then clean start with proper readiness wait)_
+`docker-compose.broken.yml` uses plain `depends_on: [postgres]` — only waits for the postgres *container* to start, not for Postgres to actually accept connections. On a fresh volume, the app tried its startup DB check immediately and exited: `startup DB check failed: connect ECONNREFUSED ...:5432` (container status `Exited (1)`).
+
+`docker-compose.yml` (fixed) adds a `healthcheck: pg_isready` on postgres and `depends_on: postgres: condition: service_healthy` on the app — Compose now waits for postgres to report healthy before even starting the app container. Result: app started cleanly, `listening on 3000`, `/healthz` and `/readyz` both 200 on first try, no crash.
 
 ### Task 27 — Volumes and persistence
-What did `docker compose down -v` do to the data?
+Postgres data lives in the named volume `ashik-notes-pgdata`, not in the container's writable layer. `docker compose down` (no `-v`) only removes containers/network — the volume stays, so a note created before `down` was still there (with its original `id`/`created_at`) right after `up` again.
 
-> 
+`docker compose down -v` additionally deletes the named volume itself — Postgres came back up completely empty (not even the schema existed, so the API returned `500` instead of `404`, since the tables themselves were gone, not just the row).
 
-_(evidence: notes survive `down`/`up`, notes gone after `down -v`, backup/restore bringing them back)_
+Backup/restore: took a `pg_dump -F c` before the `-v` wipe, then after the fresh volume came up, reloaded `schema.sql` and ran `pg_restore` from the dump — the same note (`id=1`, same `created_at`) came back exactly as it was.
 
 ### Task 28 — Debugging drill (2 marks each)
 

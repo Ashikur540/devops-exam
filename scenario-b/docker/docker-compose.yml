@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ashik-notes-postgres
+    environment:
+      POSTGRES_DB: notes
+      POSTGRES_PASSWORD: notespass
+    volumes:
+      - ashik-notes-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: ../app
+    container_name: ashik-notes-app
+    environment:
+      DATABASE_URL: postgresql://postgres:notespass@postgres:5432/notes
+      PORT: 3000
+    ports:
+      - "8300:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ashik-notes-prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9390:9090"
+    depends_on:
+      - app
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ashik-notes-grafana
+    ports:
+      - "3390:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  ashik-notes-pgdata:
