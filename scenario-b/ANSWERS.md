@@ -166,15 +166,15 @@ Provisioned via `scenario-b/grafana/provisioning/alerting/rules.yml` (declarativ
 Verified by causing it: ran a sustained heavy combined load (multiple tenants, oversized `limit`/`search` requests, 75+ concurrent every 0.1s for 40s). Alert state went `inactive` → `pending` → **`firing`** (confirmed via `GET /api/prometheus/grafana/api/v1/rules`: `alertname: "High p95 latency (any route)"`, state `Alerting`, value `1`).
 
 ### Task 34 — Fix one problem
-Fixed **Problem 3 — missing FK index on `tags.note_id`**: `CREATE INDEX idx_tags_note_id ON tags(note_id);`
+Fixed **Problem 3 — missing FK index on `tags.note_id`**: `CREATE INDEX idx_tags_note_id ON tags(note_id);` (VPS numbers below; dev-machine numbers were similar — ~44x — see earlier local test).
 
-`EXPLAIN ANALYZE` before/after (see `evidence/`):
-- The `/api/stats` join itself barely changed (88.75ms → 79.72ms) — Postgres's planner correctly chose a sequential scan + hash join either way, because that query touches almost the entire `tags` table regardless of an index. An index doesn't help when you're reading most of the table.
-- The query that actually matters — `SELECT name FROM tags WHERE note_id = $1`, the one run once per note inside the N+1 loop — went from **Seq Scan, 3.36ms** (scanning all 150,000 rows, filtering out 149,999) to **Bitmap Index Scan, 0.076ms**: a **~44x speedup** on a point lookup. Since this query runs once per note (up to 5,000 times for the heavy tenant's `?limit=5000` requests), the real-world win is on the order of seconds of DB time saved per request, not milliseconds.
+`EXPLAIN ANALYZE` before/after on the exam VPS, full 50k notes / 150k tags dataset (see `evidence/b34-1-explain-before.png`, `b34-2-explain-after.png`):
+- `SELECT name FROM tags WHERE note_id = $1` — the query run once per note inside the N+1 loop — went from **Seq Scan, 22.875ms** (150,000 rows scanned) to **Bitmap Index Scan, 0.145ms**: a **~158x speedup** on this VPS's hardware. Since this query runs once per note (up to 5,000 times for the heavy tenant's `?limit=5000` requests), the real-world win is seconds of DB time saved per request, not milliseconds.
+- Also captured live on the dashboard: dropped the index, hit `/api/notes/:id` 40 times ("before"), recreated the index ("the fix"), hit it 40 more times ("after") — Panel C (`select_note_by_id` line) shows a clean plateau around p99 ~3.5-4 for the "before" period, then drops sharply to near-0 right at the fix (`b34-3-grafana-before-after.png`).
 
 What did the fix cost?
 - Index size: `pg_size_pretty(pg_relation_size('idx_tags_note_id'))` → **2144 kB** for 150,000 rows.
-- Write cost: 3 clean `INSERT` timings without the index averaged **~0.89ms**; with the index, **~1.0ms** — a small, real overhead (~10-15%) from B-tree maintenance on every insert, not free, but easily worth it at this table's read/write ratio.
+- Write cost: insert timing was noisy on this VPS (12-49ms without the index, 4.6-7.3ms with it, dominated by per-`docker exec` connection overhead rather than the actual index-maintenance cost) — the index *size* is the more honest, reproducible cost figure here; expect a real but small per-insert overhead from B-tree maintenance that this measurement method couldn't isolate cleanly.
 
 Which problem would you fix next, and what would you need to measure first?
 
