@@ -221,12 +221,16 @@ What would've happened with no healthcheck at all — would Swarm have noticed?
 ### Task 39 — Limits vs reservations
 What did you observe, and how does limit differ from reservation?
 
-> 
+> Set `--reserve-memory 8G` (node has ~7.75GiB total) and scaled 3→4. Result (`docker service ps --no-trunc`): the brand-new replica (slot 4) stuck `Pending — "no suitable node (insufficient resources on 1 node)"` forever, and slot 3's *replacement* task got the same error — but slot 3's **old v1 task kept running** the whole time, because `start-first` never tears down the old task until the new one is ready, and the new one can never become ready. So existing traffic was completely unaffected; only new placement was blocked.
+>
+> **Reservation** = a scheduling-time promise ("don't place this task unless a node has this much free"). If no node can satisfy it, Swarm just refuses to schedule — it never touches already-running tasks. **Limit** (`--limit-memory`) is a runtime cap enforced by cgroups on a container that's already running — exceed it and the kernel OOM-kills the container (`exit 137`), same mechanism as the OOM drill in B2 Task 28a. Reservation controls *whether* a task starts at all; limit controls what happens to a task *after* it's running.
+>
+> Reverted after the test: `docker service update --reserve-memory 0 --replicas 3 ashik_notes_app`.
 
 ### Task 40 — Scale down during live traffic
 Failure count:
 
-> 
+> **1527 requests logged during the 5→2 scale-down, all 200 — zero failures.** (One stray `ignoring` line is `nohup: ignoring input` stderr again, not an HTTP response.) Makes sense: scale-down just stops the extra tasks and removes them from the routing mesh's pool — there's no "replacement" involved like a rolling update, so there's nothing that can be *not ready yet*. The routing mesh only had to stop sending new requests to the 3 removed tasks, which it did cleanly.
 
 ---
 
