@@ -1,9 +1,18 @@
+const os = require('os');
 const express = require('express');
 const db = require('./db');
 const metrics = require('./metrics');
 
+const APP_VERSION = process.env.APP_VERSION || 'v1';
+
 const app = express();
 app.use(express.json());
+
+// B4 Task 36 — every response proves which container served it.
+app.use((_req, res, next) => {
+  res.setHeader('X-Served-By', os.hostname());
+  next();
+});
 
 // Route pattern matched ourselves against the pristine path captured at the
 // very top of the middleware stack — NOT via req.route.path read later in
@@ -54,7 +63,7 @@ app.get('/metrics', async (req, res) => {
   res.end(await metrics.register.metrics());
 });
 
-app.get('/healthz', (req, res) => res.sendStatus(200));
+app.get('/healthz', (req, res) => res.status(200).json({ status: 'ok', version: APP_VERSION }));
 
 app.get('/readyz', async (req, res) => {
   try {
@@ -165,11 +174,18 @@ const PORT = process.env.PORT || 3000;
 // Fail fast if the DB isn't reachable yet — this is what exposes the
 // `depends_on` (container started) vs "ready" (accepting queries) gap.
 (async () => {
+  // B4 Task 38 — v3 is deliberately broken via this env var, baked into the
+  // image at build time (Dockerfile ARG BREAK_ON_START), so Swarm's rollback
+  // can be demonstrated without touching real app logic.
+  if (process.env.BREAK_ON_START === 'true') {
+    console.error(`v${APP_VERSION} deliberately broken: exiting on startup`);
+    process.exit(1);
+  }
   try {
     await db.query(null, 'startup_check', 'SELECT 1');
   } catch (err) {
     console.error('startup DB check failed:', err.message);
     process.exit(1);
   }
-  app.listen(PORT, () => console.log(`listening on ${PORT}`));
+  app.listen(PORT, () => console.log(`listening on ${PORT} (${APP_VERSION})`));
 })();

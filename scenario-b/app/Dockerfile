@@ -9,6 +9,10 @@ COPY src ./src
 FROM node:20-alpine
 WORKDIR /app
 ENV NODE_ENV=production
+ARG APP_VERSION=v1
+ARG BREAK_ON_START=false
+ENV APP_VERSION=$APP_VERSION
+ENV BREAK_ON_START=$BREAK_ON_START
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/src ./src

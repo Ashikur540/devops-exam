@@ -187,15 +187,23 @@ Which problem would you fix next, and what would you need to measure first?
 ### Task 35 — Deploy stack
 One node or more?
 
-> 
+> Single node (`vmi3536696`) — second VPS had issues, spec explicitly says single node is fine. Swarm on this shared VPS was already active with 3 other students' stacks (`abdur_notes`, `badhon_notes`, `faheem_notes`) running on it — deployed ours as `ashik_notes` without touching theirs. `docker stack services ashik_notes` shows `ashik_notes_app` 3/3 and `ashik_notes_postgres` 1/1.
+>
+> **Finding:** images built on Mac (Apple Silicon/arm64) failed to schedule on this x86_64 node (`no suitable node (unsupported platform on 1 node)`). Rebuilt with `docker buildx build --platform linux/amd64`. A second issue: buildx's default provenance attestation adds an extra `unknown/unknown` platform manifest to the image index, which this Swarm version (29.7.2) also rejected — fixed with `--provenance=false`. Also found once a service is created against a bad-platform image, `docker service update --force` does not clear the stale `Placement.Platforms` constraint — had to `docker service rm` + `docker stack deploy` again to recreate it clean.
+>
+> **Finding 2:** the routing mesh (published port 8400) is unreachable via `localhost`/127.0.0.1 on this VPS (curl times out — exit 28) but works correctly via the public IP. All kernel prerequisites (ip_vs, vxlan, br_netfilter, ip_forward=1) are present, and other students' published ports have the identical symptom, so this is a host-level loopback/DNAT quirk in the routing mesh, not an app bug. Workaround: use the public IP for all Swarm testing instead of localhost.
 
 ### Task 36 — Scale to 5, prove with hostnames
 _(evidence: 5 distinct `X-Served-By` hostnames)_
 
+> Scaled `ashik_notes_app` to 5, all converged Running. 50 requests with `Connection: close` (via public IP, see Task 35 finding) split perfectly evenly: 5 distinct container hostnames, 10 requests each — routing mesh load-balancing confirmed.
+
 ### Task 37 — Rolling update, zero downtime
 Failure count from `update-log.txt`. If any non-200s, explain honestly why:
 
-> 
+> 109,698 requests logged, **all 200 — zero non-200 responses**. `stack.yml`'s `update_config: order: start-first` meant each new v2 task went `Preparing → Starting → Running` (passing the Dockerfile `HEALTHCHECK`) *before* Swarm shut down the old v1 task for that slot — confirmed directly in `docker service ps` output (task.1/task.4 showed the new v2 "Running" with the old v1 still "Running" underneath it, only "Shutdown" a few seconds later). One stray log line reads `ignoring` — that's `nohup: ignoring input` (stderr, not an HTTP response), not a real failure.
+>
+> Traffic loop was accidentally left running in the background for ~12.5 hours (the first `pkill -f '...%{http_code}...'` failed with a regex error because `{}` is special in extended regex) — killed by PID once caught. Noted here as a shared-VPS hygiene lesson, not part of the graded result.
 
 ### Task 38 — Break v3, rollback
 How long from deploy command to full rollback (from `docker service ps` timestamps)?
