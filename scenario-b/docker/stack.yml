@@ -26,6 +26,9 @@ services:
         parallelism: 1
         order: start-first
         delay: 5s
+        monitor: 15s
+        max_failure_ratio: 0
+        failure_action: rollback
       restart_policy:
         condition: on-failure
         max_attempts: 3

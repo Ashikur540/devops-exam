@@ -208,11 +208,15 @@ Failure count from `update-log.txt`. If any non-200s, explain honestly why:
 ### Task 38 — Break v3, rollback
 How long from deploy command to full rollback (from `docker service ps` timestamps)?
 
-> 
+> **~15.5 seconds** — `docker service inspect --format '{{json .UpdateStatus}}'` shows `StartedAt: 15:37:15.716`, `CompletedAt: 15:37:31.209`, `State: rollback_completed`. Fast because v3 (`BREAK_ON_START=true`) does `process.exit(1)` immediately at boot — Swarm's task reaper sees the container exit instantly, it doesn't have to wait through healthcheck retry cycles to decide the task failed.
+>
+> Honest note: right before this test, `docker stack deploy` was re-run just to add `failure_action: rollback` to the config — but `stack.yml`'s `image:` field was still hardcoded to `v1` (never bumped to `v2` after Task 37), so that redeploy *silently downgraded the running v2 service back to v1* before the v3 test even started. So this rollback actually reverted v3 → v1, not v3 → v2. Still valid evidence of the mechanism (Swarm rolled back to the last known-good spec automatically), just noting the real version numbers rather than claiming it was v2. Lesson: a compose/stack file is the declared source of truth — an out-of-band `service update --image` (like Task 37's v2 deploy) drifts from it until the file itself is updated, and the next `stack deploy` silently reverts that drift.
 
 What would've happened with no healthcheck at all — would Swarm have noticed?
 
-> 
+> Partially. This specific break (`process.exit(1)` on boot) would **still** be caught with no `HEALTHCHECK` at all — the container process exiting is a Docker/containerd-level event, not something the `HEALTHCHECK` instruction detects. Swarm sees "exited non-zero" directly and would still mark the task Failed and roll back.
+>
+> But the *other* common break in the spec — `/healthz` returning 500 while the process itself keeps running — would **not** be noticed without a healthcheck. The container looks "Running" to Swarm either way; only the `HEALTHCHECK` (checked via `docker inspect`'s Health status) tells Swarm the app inside is actually broken. Without it, Swarm would leave that broken task in rotation and the routing mesh would keep sending it real traffic forever.
 
 ### Task 39 — Limits vs reservations
 What did you observe, and how does limit differ from reservation?
