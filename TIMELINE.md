@@ -36,3 +36,17 @@
   - A multi-line copy-pasted command block (volume backup/restore test) got garbled in the VPS terminal — stuck at a `>` continuation prompt with some commands receiving wrong arguments. Recovered by running the remaining steps one at a time; turned out the restore had actually already succeeded once inside the garbled block, so the "already exists" errors on the second attempt were harmless — confirmed data was correctly restored via a direct API check.
 - time spent so far: ~6 hrs (ongoing).
 - Next: finish B2 Task 28 debugging drills and remaining B3 evidence on the VPS, then B4 (Docker Swarm) and B5 (CI/CD).
+
+## 2026-09-08 / 2026-09-09
+
+- Finished B3 (Tasks 29-34) evidence and alert threshold fix, wrapping up all of B1-B3 (68 marks).
+- Built B4 — Docker Swarm (Tasks 35-40, 26 marks): app updated with `X-Served-By` header, version field, and a `BREAK_ON_START` flag for the v3 rollback test. Deployed a single-node stack (`ashik_notes`) on the shared VPS, which turned out to already be running Swarm with 3 other students' stacks on it.
+- Real problems hit and fixed:
+  - Images built on Mac (arm64) wouldn't schedule on the VPS's x86_64 node — fixed with `docker buildx --platform linux/amd64`. A second layer of the same bug: buildx's default provenance attestation manifest also broke scheduling on this Docker version — fixed with `--provenance=false`.
+  - `docker service update --force` didn't clear a stale platform constraint from the first bad deploy — had to remove and recreate the service.
+  - Swarm's routing mesh isn't reachable via `localhost` on this VPS (works fine via the public IP) — confirmed it affects every other student's services too, so it's a host quirk, not our bug. Used the public IP for every test after that.
+  - Caught our own config-drift bug: redeploying `stack.yml` just to add `failure_action: rollback` silently downgraded the running v2 service back to v1, because the file's `image:` field was never bumped after the Task 37 test. Rollback test ended up being v3→v1, documented honestly instead of hidden.
+  - A background traffic-loop process was left running unattended for ~12.5 hours after a `pkill` regex bug (`{}` is special in extended regex) failed silently — caught it, killed it properly by PID.
+- All 6 tasks (deploy, scale-to-5 with hostname proof, zero-downtime rolling update, break+auto-rollback, reservation-vs-limit, scale-down-under-traffic) passed with real evidence, screenshots verified, and committed.
+- time spent: ~4-5 hrs.
+- Next: B5 — CI/CD with GitHub Actions (30 marks).
