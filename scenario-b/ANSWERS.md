@@ -248,7 +248,12 @@ Passed run link:
 ### Task 42 — Caching
 Cold run duration: ___  Warm run duration: ___  Improvement:
 
-> 
+> Added `actions/setup-node@v4` with `cache: npm` + `cache-dependency-path` to `.github/workflows/pr.yml`.
+>
+> Cold run (no cache to restore, `npm cache is not found`): job **40s** total, `npm ci` itself reported `added 86 packages... in 1s`.
+> Warm run (`Cache hit for: node-cache-Linux-x64-npm-...`, `Cache restored successfully`): job **32s** total, `npm ci` reported `added 86 packages... in 753ms`.
+>
+> ~20% faster job overall, ~25% faster on the `npm ci` step itself. Honest note: the improvement is modest in absolute terms because this app only has 86 packages (express/pg/prom-client + a small dependency tree) — the network-fetch time the cache skips just isn't that large here. The mechanism is proven correct (a real `Cache hit`/`Cache restored` log line, not a guess), it just doesn't produce a dramatic number on a small project. First had to learn GitHub Actions caches are scoped per-branch (not shared across unrelated feature branches) — the first "warm" attempt on a different branch than the one that saved the cache still came back cold; the real warm run needed to be on the same branch that had already saved a cache.
 
 ### Task 43 — Main branch pipeline
 Multi-arch build — did you do it? If not, why might you want it?
