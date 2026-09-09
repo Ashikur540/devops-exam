@@ -258,7 +258,9 @@ Cold run duration: ___  Warm run duration: ___  Improvement:
 ### Task 43 — Main branch pipeline
 Multi-arch build — did you do it? If not, why might you want it?
 
-> 
+> Skipped it. Reason to want it: our own B4 work hit this exact problem for real — an image built on a Mac (Apple Silicon/arm64) failed to schedule on the x86_64 Swarm node with `no suitable node (unsupported platform)`. A multi-arch build (`linux/amd64,linux/arm64` via buildx) would make the same tag pullable and runnable on either architecture, so a dev machine's architecture never matters. Skipped here because our actual deploy target (the exam VPS) is a fixed x86_64 host — building for an architecture we'll never deploy to just adds QEMU-emulation build time for no benefit in this pipeline.
+>
+> `.github/workflows/deploy.yml` builds on every push to main (path-filtered to `scenario-b/**`), tags with **both** the git SHA (`ghcr.io/ashikur540/notes-api:<sha>` — exact, traceable to one commit) and a version tag (`v1.0.<run_number>` — human-friendly, monotonically increasing), and pushes to **GHCR**. Auth is the workflow's own `GITHUB_TOKEN` (`permissions: packages: write`) — minted fresh per run, expires when the job ends, never stored as a repo secret. No AWS keys or any other static credential anywhere in this workflow.
 
 ### Task 44 — Deploy with approval gate
 _(evidence: paused workflow, approved deploy, VPS running new image tag)_

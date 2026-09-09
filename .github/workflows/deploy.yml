@@ -1,0 +1,46 @@
+# EXAM_TOKEN: ashik-devops-vmi3536696-1788500224-d4790b52
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scenario-b/**'
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/ashikur540/notes-api
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        # GITHUB_TOKEN is minted fresh per run and expires when the job ends -
+        # no long-lived static credential stored as a repo secret (B5 Task 43
+        # hard rule).
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Build image
+        working-directory: scenario-b/app
+        run: |
+          docker build \
+            -t $IMAGE:${{ github.sha }} \
+            -t $IMAGE:v1.0.${{ github.run_number }} \
+            .
+
+      - name: Push image
+        run: |
+          docker push $IMAGE:${{ github.sha }}
+          docker push $IMAGE:v1.0.${{ github.run_number }}
