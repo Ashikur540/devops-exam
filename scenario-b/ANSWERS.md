@@ -238,7 +238,12 @@ Failure count:
 
 ### Task 41 — PR pipeline
 Failed run link:
+> https://github.com/Ashikur540/devops-exam/actions/runs/34379151895 — deliberately broke the `/healthz` status assertion (expected 201 instead of 200) in `scenario-b/app/test/app.test.js`. Unit test step failed, and the Docker build / container-smoke-test steps were correctly skipped (workflow fails fast).
+
 Passed run link:
+> https://github.com/Ashikur540/devops-exam/actions/runs/34379272429 — same PR, fixed the assertion back to 200 and pushed again. All steps green including the real container smoke test (build image, run it against a real `postgres:16-alpine` service container, curl `/healthz`, exit non-zero if it never comes up healthy) — this is the step that would catch an image that builds fine but crashes/hangs on boot, which a build-only check would miss.
+>
+> 4 real unit tests (`node --test`, Node's built-in runner, no new dependency): `/healthz` returns 200, `/healthz` sets `X-Served-By`, `/api/notes` without `X-Tenant` returns 400, unknown route returns 404. Refactored `server.js` to guard its DB-check-and-listen startup behind `require.main === module` so tests can import the Express app directly without needing a live Postgres.
 
 ### Task 42 — Caching
 Cold run duration: ___  Warm run duration: ___  Improvement:
