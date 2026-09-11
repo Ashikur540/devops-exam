@@ -50,3 +50,16 @@
 - All 6 tasks (deploy, scale-to-5 with hostname proof, zero-downtime rolling update, break+auto-rollback, reservation-vs-limit, scale-down-under-traffic) passed with real evidence, screenshots verified, and committed.
 - time spent: ~4-5 hrs.
 - Next: B5 — CI/CD with GitHub Actions (30 marks).
+
+## 2026-09-11
+
+- Fixed a real blocker first: the GitHub remote (`Ashikur540/devops-exam`) had gone unreachable (404) from the authenticated CLI account — sorted out by switching auth back to the right account and re-pushing everything via GitHub Desktop for the rest of the session (the CLI account never got write access).
+- Built B5 — CI/CD with GitHub Actions (Tasks 41-46, 30 marks), completing all of Scenario B (124/124 marks):
+  - Task 41: `.github/workflows/pr.yml` — 4 real unit tests (Node's built-in `node:test`, no new dependency), Docker build, then an actual container-start-and-curl-`/healthz` smoke test against a real Postgres service container. Refactored `server.js` to guard its DB-check-and-listen startup behind `require.main === module` so tests can import the app without a live DB. Demonstrated a real failing PR run, then a real passing one after the fix.
+  - Task 42: npm caching via `actions/setup-node`'s `cache: npm`. Learned GitHub Actions caches are scoped per-branch, not shared across unrelated feature branches — first "warm" attempt on a different branch still came back cold; had to push a second commit on the *same* branch to get a genuine cache hit (`added 86 packages... in 1s` cold vs `753ms` warm — modest but real given the tiny dependency tree).
+  - Task 43: `.github/workflows/deploy.yml` on push to main, tags with git SHA + version, pushes to **GHCR** using the workflow's own short-lived `GITHUB_TOKEN` instead of a Docker Hub PAT — satisfies the "no long-lived credentials" hard rule with zero secrets needed for registry auth.
+  - Task 44: added a `deploy` job gated behind a GitHub `production` Environment with a required reviewer, SSHing into the VPS with a dedicated deploy-only key. Hit two real bugs: the path filter didn't include the workflow file itself (editing `deploy.yml` never triggered `deploy.yml`), and the first `VPS_SSH_KEY` secret paste was missing the `BEGIN/END` lines (`ssh: no key found`) — both fixed.
+  - Task 45: broke the pipeline three ways (failing test, bad Dockerfile `COPY`, typo'd Swarm service name in the deploy step) and proved production was untouched every time — the typo'd deploy failed cleanly against a service that doesn't exist, never touching the real `ashik_notes_app`.
+  - Task 46: documented the `concurrency: group: deploy-main` safeguard already in `deploy.yml`, with a real incident from this exact session as the example (a follow-up push landing before the first deploy finished).
+- time spent: ~4 hrs.
+- Scenario B complete. Next: Scenario C — AWS and Multi-Tenancy (94 marks).
