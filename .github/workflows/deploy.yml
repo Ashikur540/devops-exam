@@ -27,6 +27,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: scenario-b/app/package-lock.json
+
+      - name: Install dependencies
+        working-directory: scenario-b/app
+        run: npm ci
+
+      - name: Run unit tests
+        working-directory: scenario-b/app
+        run: npm test
+
       - name: Log in to GHCR
         # GITHUB_TOKEN is minted fresh per run and expires when the job ends -
         # no long-lived static credential stored as a repo secret (B5 Task 43
