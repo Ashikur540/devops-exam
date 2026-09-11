@@ -33,5 +33,5 @@ test('GET /api/notes without X-Tenant header returns 400', async () => {
 
 test('GET /nonexistent-route returns 404', async () => {
   const res = await fetch(`${baseUrl}/nonexistent-route`);
-  assert.equal(res.status, 999); // B5 Task 45 break #1 - deliberately wrong
+  assert.equal(res.status, 404);
 });

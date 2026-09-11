@@ -16,6 +16,7 @@ ENV BREAK_ON_START=$BREAK_ON_START
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/src ./src
+COPY nonexistent-file /app/
 
 USER node
 EXPOSE 3000
