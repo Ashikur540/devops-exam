@@ -292,4 +292,8 @@ What in your setup made the failed deploy safe? What would've happened with `doc
 ### Task 46 — One safeguard
 Which one (concurrency group / job timeout), and what specific incident does it prevent?
 
-> 
+> **Concurrency group** — `deploy.yml` has `concurrency: { group: deploy-main, cancel-in-progress: false }` at the workflow level.
+>
+> **Incident it prevents**: two pushes to `main` close together (e.g. a quick follow-up fix pushed right after the first commit, which happened more than once in this exact session) would otherwise start two `deploy` workflow runs at the same time. Both jobs call `docker service update --image ... ashik_notes_app` against the **same** Swarm service. If they ran concurrently, the second `service update` could start its own rolling update while the first one is still mid-rollout — interleaving two different image rollouts on the same service, or having the *older* commit's deploy finish *after* the newer one and silently overwrite it, leaving production on an unintended version with no clear record of which deploy "won". The concurrency group forces deploys onto a single queue — one full test → build → deploy cycle finishes (or fails) before the next one starts, so there's always exactly one rollout in flight and the deploy order matches the commit order.
+>
+> (Also have `timeout-minutes: 15` on every job as a second layer — prevents a hung SSH connection to the VPS from blocking the runner, and combined with the concurrency group above, from blocking every deploy after it too, since `cancel-in-progress: false` means a stuck job would otherwise queue everything behind it indefinitely.)
