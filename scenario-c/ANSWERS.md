@@ -5,10 +5,14 @@ Exam token used in this scenario's screenshots: `PASTE_TOKEN`
 ## C1 — IAM (Tasks 47-48)
 
 ### Task 47 — exam-deployer policy
-_(policy JSON in this folder or configs/, evidence: successful ECR push, denied `aws s3 ls`)_
+_(policy JSON: `scenario-c/aws/exam-deployer-policy.json`, evidence: successful ECR push, denied `aws s3 ls`)_
 Where you used `"*"`, note why here:
 
-> 
+> `ecr:GetAuthorizationToken` must use `Resource: "*"` — it is an account-level action (it
+> returns a token for the whole ECR registry, not a specific repo), and AWS does not support
+> resource-level restriction on it. Every other action in the policy is scoped to one exact
+> repository ARN (`repository/ashik-notes-api`) or one exact service ARN
+> (`service/ashik-notes-cluster/ashik-notes-svc`).
 
 ### Task 48 — Policy simulator
 4 actions tested (2 allow, 2 deny) — results:
