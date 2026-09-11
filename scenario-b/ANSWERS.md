@@ -265,6 +265,12 @@ Multi-arch build — did you do it? If not, why might you want it?
 ### Task 44 — Deploy with approval gate
 _(evidence: paused workflow, approved deploy, VPS running new image tag)_
 
+> Added a `deploy` job to `deploy.yml`, gated behind a GitHub **`production` Environment** with a required reviewer — the job pauses with "Review pending deployments" until manually approved. On approval it SSHes into the VPS (`appleboy/ssh-action`) using a dedicated deploy-only key (not a personal key, added just to `ashik-devops`'s own `authorized_keys`) and runs `docker service update --image ghcr.io/ashikur540/notes-api:<sha> ashik_notes_app`.
+>
+> Verified end-to-end: `docker service ps ashik_notes_app` on the VPS shows both replicas running `ghcr.io/ashikur540/notes-api:cdc540010c10f8a838cd80f94be66afd243fff41` — the exact commit SHA from the approved run.
+>
+> Hit two real bugs getting here: (1) the workflow's own `paths: scenario-b/**` filter didn't include `.github/workflows/deploy.yml` itself, so editing the workflow to add this job never triggered a run — fixed by adding the workflow file to its own path filter. (2) The first deploy attempt failed with `ssh: no key found` — the `VPS_SSH_KEY` secret was pasted without the full `-----BEGIN/END-----` key block; re-pasting the exact raw key content fixed it.
+
 ### Task 45 — Break the pipeline 3 ways
 1. Failing test — run link:
 2. Build error — run link:
