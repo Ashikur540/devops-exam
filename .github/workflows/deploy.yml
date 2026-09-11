@@ -44,3 +44,23 @@ jobs:
         run: |
           docker push $IMAGE:${{ github.sha }}
           docker push $IMAGE:v1.0.${{ github.run_number }}
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # B5 Task 44 - this environment has a required reviewer configured in
+    # GitHub Settings, so the job pauses here for manual approval before it
+    # touches the VPS.
+    environment: production
+    steps:
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            docker service update --image ghcr.io/ashikur540/notes-api:${{ github.sha }} ashik_notes_app
+            sleep 15
+            docker service ps ashik_notes_app

@@ -12,3 +12,4 @@ vendor/
 id_rsa*
 .aws/
 exam_token.txt
+scenario-b/.deploy-key-tmp/
