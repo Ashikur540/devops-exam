@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - 'scenario-b/**'
+      - '.github/workflows/deploy.yml'
 
 permissions:
   contents: read
