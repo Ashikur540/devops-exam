@@ -77,6 +77,8 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            docker service update --image ghcr.io/ashikur540/notes-api:${{ github.sha }} ashik_notes_app
+            set -e
+            # B5 Task 45 break #3 - deliberately wrong service name (deploy failure)
+            docker service update --image ghcr.io/ashikur540/notes-api:${{ github.sha }} ashik_notes_app_TYPO
             sleep 15
-            docker service ps ashik_notes_app
+            docker service ps ashik_notes_app_TYPO
