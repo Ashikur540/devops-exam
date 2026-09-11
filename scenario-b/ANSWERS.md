@@ -273,12 +273,21 @@ _(evidence: paused workflow, approved deploy, VPS running new image tag)_
 
 ### Task 45 — Break the pipeline 3 ways
 1. Failing test — run link:
+> https://github.com/Ashikur540/devops-exam/actions/runs/34613267266 — wrong status assertion in `app.test.js`. Failed at "Run unit tests"; build/push/deploy all skipped, production never touched.
+
 2. Build error — run link:
+> https://github.com/Ashikur540/devops-exam/actions/runs/34613383329 — `COPY nonexistent-file /app/` added to the Dockerfile. Unit tests passed, failed at "Build image"; push/deploy skipped.
+
 3. Deploy failure — run link:
+> https://github.com/Ashikur540/devops-exam/actions/runs/34613822138 — deploy step targeted a typo'd service name (`ashik_notes_app_TYPO`). Tests and build passed, deploy job was approved and ran, then failed with `Error response from daemon: service ashik_notes_app_TYPO not found`.
+
+**Proof production survived**: right after the break #3 run, `docker service ps ashik_notes_app` on the VPS showed both replicas still `Running` on `ghcr.io/ashikur540/notes-api:96935e61d9dcb0dcf7d76b7078113d95a6dc54d6` — the last *successfully* deployed image, with zero task history entries for the typo'd name — and `curl http://169.58.246.108:8400/healthz` returned `200 {"status":"ok","version":"v1"}`.
 
 What in your setup made the failed deploy safe? What would've happened with `docker service rm` + recreate instead?
 
-> 
+> The deploy step calls `docker service update --image ... ashik_notes_app` — a single API call against one named, already-running service. When the name was wrong, the Swarm manager rejected the call outright (`service not found`) before touching anything; the real `ashik_notes_app` service was never referenced by that failed command at all, so its running tasks were completely unaffected. Even with the *correct* name, `service update` is a rolling update (per B4: `order: start-first`, `failure_action: rollback`) — a bad new image would fail its own tasks while the old, working tasks keep serving traffic until Swarm gives up and rolls back.
+>
+> `docker service rm` + recreate would have been far more dangerous: `rm` deletes the service and stops all its running tasks **immediately** — that's real, instant downtime, before the "recreate" half even starts. If the recreate command then failed for the same reason (typo, bad image, whatever), there would be no service running at all — a complete outage — because the working version was already destroyed and there's nothing to fall back to. `service update` never deletes anything that's already working; `service rm` throws away the safety net first and creates a new one second.
 
 ### Task 46 — One safeguard
 Which one (concurrency group / job timeout), and what specific incident does it prevent?
