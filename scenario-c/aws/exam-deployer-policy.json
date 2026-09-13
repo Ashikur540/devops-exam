@@ -15,7 +15,8 @@
         "ecr:InitiateLayerUpload",
         "ecr:UploadLayerPart",
         "ecr:CompleteLayerUpload",
-        "ecr:PutImage"
+        "ecr:PutImage",
+        "ecr:BatchGetImage"
       ],
       "Resource": "arn:aws:ecr:ap-southeast-1:<ACCOUNT_ID>:repository/ashik-notes-api"
     },
