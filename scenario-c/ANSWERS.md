@@ -5,7 +5,7 @@ Exam token used in this scenario's screenshots: `PASTE_TOKEN`
 ## C1 — IAM (Tasks 47-48)
 
 ### Task 47 — exam-deployer policy
-_(policy JSON: `scenario-c/aws/exam-deployer-policy.json`, evidence: successful ECR push, denied `aws s3 ls`)_
+_(policy JSON: `scenario-c/aws/exam-deployer-policy.json`, evidence: `evidence/c47-1-push-success-terminal.png`, `evidence/c47-2-denied-s3.png`)_
 Where you used `"*"`, note why here:
 
 > `ecr:GetAuthorizationToken` must use `Resource: "*"` — it is an account-level action (it
@@ -13,6 +13,14 @@ Where you used `"*"`, note why here:
 > resource-level restriction on it. Every other action in the policy is scoped to one exact
 > repository ARN (`repository/ashik-notes-api`) or one exact service ARN
 > (`service/ashik-notes-cluster/ashik-notes-svc`).
+
+**Real bug hit:** the first push attempt uploaded every layer successfully but failed on the
+final manifest step with `not authorized to perform: ecr:BatchGetImage`. AWS's own docs list
+only `BatchCheckLayerAvailability`, `InitiateLayerUpload`, `UploadLayerPart`,
+`CompleteLayerUpload`, `PutImage` as the push permissions, but modern Docker CLI also calls
+`BatchGetImage` at the end of a push (to check for an existing manifest). Added it as a second
+policy version and the push then completed. Documented here instead of just silently adding it,
+since the AWS docs being incomplete for this is a genuine gotcha worth recording.
 
 ### Task 48 — Policy simulator
 4 actions tested (2 allow, 2 deny) — results:
@@ -24,7 +32,7 @@ Where you used `"*"`, note why here:
 ## C2 — ECS deployment (Tasks 49-54)
 
 ### Task 49 — Push to ECR
-_(evidence only)_
+_(evidence: `evidence/c49-1-ecr-tag-size.png` — tag `v1`, 50.48 MB, digest matches the push output)_
 
 ### Task 50 — Task definition
 _(task-def JSON committed with account ID redacted, evidence: running task, CloudWatch logs)_

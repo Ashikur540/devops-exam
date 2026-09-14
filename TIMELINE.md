@@ -70,3 +70,17 @@
 - Real incident, unrelated to our work: a "My Zero-Spend Budget" alert fired showing $8.22 actual cost for the month, before we had created a single AWS resource. Investigated — billing pages were "Access denied" even for an admin IAM user, because AWS blocks IAM users from viewing Billing/Cost Management unless the **root** account enables "IAM user and role access to billing information" (a root-only, account-level toggle that `AdministratorAccess` does not override). Left as a known gap for now since the team lead's account already has free credit covering it; will revisit at cleanup (Task 63) to confirm final cost.
 - Completed Task 47 setup (exam-deployer IAM user): created ECR repo `ashik-notes-api`, wrote a scoped policy (`scenario-c/aws/exam-deployer-policy.json`) allowing only `ecr:GetAuthorizationToken` (account-level, must be `Resource: "*"`, documented why), scoped ECR push actions on the one repo ARN, and `ecs:UpdateService` on one future service ARN (`ashik-notes-cluster/ashik-notes-svc`, named in advance since ECS ARNs are deterministic before the service exists). Created the `exam-deployer` IAM user, attached the policy, generated its access key — verified via `describe-repositories` / `get-user` / `list-attached-user-policies`, all ARNs match.
 - Stopped here for the day deliberately — nothing billable-per-hour exists yet (ECR/IAM only), so it's safe to leave overnight. Next session: push evidence for Task 47+49 with the `exam-deployer` profile, Task 48 (policy simulator), then C2 (ECS/ALB/Fargate) — which *does* bill per hour, so that block will be done start-to-finish in one sitting with no overnight gap.
+
+## 2026-09-14 — Task 47 + 49 evidence
+
+- Resumed after a two-day break. First push attempt failed on the final manifest step:
+  `exam-deployer` wasn't authorized for `ecr:BatchGetImage` — AWS's push-permission docs don't
+  list it, but modern Docker CLI needs it anyway. Fixed with a second IAM policy version.
+- Second attempt failed differently: ECR login token had expired (12h TTL, we'd logged in two
+  days earlier) — re-ran `aws ecr get-login-password | docker login` and the push went through
+  cleanly.
+- Confirmed the AWS account is shared with at least one other person beyond the team lead —
+  saw a `badhon/devops-exam` ECR repo sitting next to ours. Left it untouched, same rule as the
+  shared VPS.
+- Task 47 (exam-deployer push proof + `aws s3 ls` AccessDenied) and Task 49 (ECR image tag +
+  size) evidence captured and verified.
