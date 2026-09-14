@@ -23,9 +23,13 @@ policy version and the push then completed. Documented here instead of just sile
 since the AWS docs being incomplete for this is a genuine gotcha worth recording.
 
 ### Task 48 — Policy simulator
+_(evidence: `evidence/c48-1-policy-simulator.png`)_
 4 actions tested (2 allow, 2 deny) — results:
 
-> 
+> - `ecr:PutImage` on `repository/ashik-notes-api` → **allowed** (exact repo match)
+> - `ecs:UpdateService` on `service/ashik-notes-cluster/ashik-notes-svc` → **allowed** (exact service match)
+> - `s3:DeleteBucket` → **implicitDeny** (no S3 permissions at all in the policy)
+> - `ecs:DeleteService` on the same service ARN → **implicitDeny** (only `UpdateService` is granted, not the whole `ecs:*` namespace)
 
 ---
 
