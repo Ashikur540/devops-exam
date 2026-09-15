@@ -185,9 +185,10 @@ plus an `attachments` table so a download request can be checked against the req
 A few real mistakes and a genuinely annoying debugging session along the way, worth recording
 honestly:
 
-- Pasted a real AWS secret access key into the chat by accident (twice, actually) while setting
-  up the app's IAM credentials. Rotated the key both times. Lesson that stuck: write credentials
-  straight to a file on the VPS from a script, never type/paste them through the chat at all.
+- A real AWS secret access key ended up printed to the terminal by accident (twice, actually)
+  while setting up the app's IAM credentials. Rotated the key both times. Lesson that stuck:
+  write credentials straight to a file on the VPS from a script, never echo/print them to the
+  screen at all.
 - Large multi-command pastes into the VPS SSH session keep corrupting mid-paste (this is now the
   third time this exact thing has happened across the whole exam). The fix that's actually
   reliable: one file per paste, nothing chained after it in the same block, and verify immediately
