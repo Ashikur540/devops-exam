@@ -112,3 +112,27 @@ that cost nothing until something actually runs on them:
 - Nothing billable exists yet — safe to leave overnight. Tomorrow: ALB + ECS service (Task 51),
   autoscaling + load test (Task 52), CI/CD extension (Task 53), break/debug (Task 54) — done in
   one sitting, then the ALB/service torn down the same day.
+
+## 2026-09-15 — Task 51 + 52 (ALB, autoscaling, real load test)
+
+- Created the ALB, target group (target-type `ip`, required for Fargate `awsvpc` mode), listener,
+  and the `ashik-notes-svc` ECS service (2 tasks). Reached steady state in under 2 minutes.
+- Each Fargate task runs its own isolated Postgres sidecar (no shared storage), so schema + the
+  existing 50k-note seed (`db/seed.sql` from Scenario B) had to be loaded into *each* running
+  task's Postgres separately — temporarily opened port 5432 on the task security group from the
+  VPS's IP only, seeded both, then closed the rule again.
+- Task 51: proved the ALB round-robins across different tasks — 10 requests to `/healthz`
+  alternated between two different `X-Served-By` hostnames.
+- Task 52: registered a target-tracking autoscaling policy (`ECSServiceAverageCPUUtilization`,
+  target 50%, min 2 / max 6), then hammered `/api/search?q=abc` (the deliberately unindexed
+  search, now backed by real seeded data) with `hey -z 5m -c 50`. CPU spiked to ~56%, ECS scaled
+  2 → 4 tasks. Real timings captured: ~9 minutes from load starting to a new task actually
+  serving traffic; ~26 minutes (stepping down gradually, 4 → 3 → 2) to scale back in after the
+  load stopped. Documented both numbers and the "autoscaling can't save you from a sudden spike"
+  reasoning in ANSWERS.md.
+- Real problems hit:
+  - `watch` in a second SSH session failed with `--region: expected one argument` — `$AWS_REGION`
+    isn't exported into a brand-new shell session; fixed by hardcoding the region in that command
+    instead of relying on the variable.
+  - Forgot the ECS CLI's default pager (`less`) makes JSON output look like a hang — same fix as
+    yesterday, `export AWS_PAGER=""` up front in every new session from now on.

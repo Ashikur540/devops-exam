@@ -50,12 +50,38 @@ needed more than the spec's suggested 256 CPU / 512 MB (that number assumes a se
 bumped to 512 CPU / 1024 MB — still Fargate's cheapest realistic tier for two containers.
 
 ### Task 51 — Behind ALB
-_(evidence: repeated requests showing different task identities)_
+_(evidence: `c51-1-different-tasks.png` — 10 requests to the ALB's `/healthz` alternate between
+two `X-Served-By` hostnames, `ip-172-31-27-75...` and `ip-172-31-15-26...`, proving round-robin
+across two different Fargate tasks)_
 
 ### Task 52 — Autoscaling
+_(evidence: `c52-1-scaling-policy.png`, `c52-2-scale-out-count.png`, `c52-3-scale-out-events.png`,
+`c52-4-cpu-graph.png`, `c52-5-load-test-summary.png`)_
+
 Time from CPU going high to a new task actually serving traffic — add up metric delay + alarm evaluation + task startup + health checks. Why can't autoscaling save you from a sudden spike?
 
-> 
+> Real timestamps from this run (`hey -z 5m -c 50` against `/api/search?q=abc`, an unindexed
+> LIKE query over 50k seeded notes):
+> - Load test started: 03:33:13
+> - ECS actually changed desired count 2 → 4 ("Setting desired count to 4"): ~03:38-03:39
+>   (~5-6 min later — CloudWatch metric delay + the target-tracking alarm needing a few
+>   consecutive 1-minute datapoints over the 50% threshold before it acts)
+> - New tasks confirmed `Running` behind the ALB: by 03:42 (another ~3-4 min — Fargate pulling
+>   and starting a 2-container task, then passing the container health check and the ALB target
+>   group's health check before it gets real traffic)
+> - **Total: ~9 minutes** from the CPU spike starting to a new task actually serving requests.
+>
+> This is why autoscaling cannot save you from a *sudden* spike: a spike shorter than ~9 minutes
+> is already over (or has already caused timeouts/errors) before any new capacity exists.
+> Autoscaling helps with sustained or gradually-growing load, not a flash traffic burst — for
+> that you need pre-provisioned headroom (a higher min-capacity) or backpressure/a queue in
+> front of the app, not a reactive scale-out policy.
+>
+> **Scale-in was much slower than scale-out**, as expected: load test ended ~03:38, but the
+> service didn't step back down to the minimum of 2 tasks until ~04:04 — **~26 minutes**, and it
+> stepped down gradually (4 → 3 → 2) rather than dropping straight to the minimum. This matches
+> the exam's own hint that "cooldown periods are long by default" — target tracking is
+> deliberately conservative about scaling in, to avoid flapping if load is just briefly dipping.
 
 ### Task 53 — Deploy from CI/CD
 _(evidence: pipeline run deploying to ECS, new task-def revision, trust policy showing repo condition)_
