@@ -111,9 +111,31 @@ branch. Real bugs hit getting this working:
    invalidated the least-privilege proof already captured there.
 
 ### Task 54 — Debug a broken deploy
+_(evidence: `c54-1-break-command.png`, `c54-2-failure-state.png`, `c54-4-fixed-state.png`)_
+
 Which thing did you break, and exact order of checks used to debug it?
 
-> 
+> **Broke it:** changed the target group's health check path from `/healthz` to `/health`
+> (a route that doesn't exist — the app returns 404 for it) via `aws elbv2 modify-target-group`.
+>
+> **Order of checks used to debug:**
+> 1. `curl` the ALB directly — still got occasional 200s during the transition, so the app itself
+>    wasn't down; pointed at something between the ALB and the app, not the app crashing.
+> 2. `aws elbv2 describe-target-health` — showed both real targets `unhealthy` with reason
+>    `Target.ResponseCodeMismatch`, and ECS already `draining` and replacing them (visible in the
+>    ECS service's Events tab too). `ResponseCodeMismatch` specifically means the health check
+>    *is* reaching the container and getting a response, just not the expected `200` — that
+>    narrows it to "wrong health check config", not "container isn't listening" or "container
+>    crashed" (which would show `Target.FailedHealthChecks` / connection-refused reasons instead).
+> 3. `aws elbv2 describe-target-groups` on that target group — read back `HealthCheckPath` and
+>    saw `/health` instead of the app's real `/healthz` route (confirmed against `server.js`).
+> 4. **Fix:** `aws elbv2 modify-target-group --health-check-path /healthz` back to the correct
+>    path. Within ~30-45s (2 consecutive healthy checks at a 15s interval) both targets flipped
+>    back to `healthy` and the ALB was serving 200s again.
+>
+> This mismatch-reason distinction (`ResponseCodeMismatch` vs a connection-level failure) is the
+> single most useful signal for this class of bug — it immediately rules out "the container is
+> broken" and points straight at the health check configuration instead.
 
 ---
 
