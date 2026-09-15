@@ -84,7 +84,31 @@ Time from CPU going high to a new task actually serving traffic — add up metri
 > deliberately conservative about scaling in, to avoid flapping if load is just briefly dipping.
 
 ### Task 53 — Deploy from CI/CD
-_(evidence: pipeline run deploying to ECS, new task-def revision, trust policy showing repo condition)_
+_(evidence: `c53-1-pipeline-success.png`, `c53-2-new-task-def-revision.png` (revision 1 → 3),
+`c53-3-trust-policy-repo-condition.png`. Policies: `scenario-c/aws/github-actions-oidc-trust-policy.json`,
+`scenario-c/aws/github-actions-ecs-deploy-policy.json`)_
+
+Added a `deploy-to-ecs` job to `deploy.yml`, authenticating via GitHub's OIDC token instead of a
+stored AWS access key — an IAM role (`github-actions-ecs-deploy`) trusts only this repo's `main`
+branch. Real bugs hit getting this working:
+
+1. **`Not authorized to perform sts:AssumeRoleWithWebIdentity`** even with the role's `sub`
+   condition looking correct. Root cause found via CloudTrail (`aws cloudtrail lookup-events
+   --lookup-attributes AttributeKey=EventName,AttributeValue=AssumeRoleWithWebIdentity`): GitHub's
+   actual token `sub` claim was `repo:Ashikur540@71774350/devops-exam@1353838435:ref:refs/heads/main`
+   — GitHub appends stable numeric owner/repo IDs to the subject claim (likely because this
+   repo/owner was renamed at some point), not the plain `repo:OWNER/REPO:ref:...` format most
+   OIDC examples show. Fixed by matching the exact observed value.
+2. Also tried `role-skip-session-tagging: true` on a hunch (`configure-aws-credentials@v4` tags
+   sessions by default, needing `sts:TagSession`) — this wasn't actually the cause here, but is
+   a real, separate gotcha worth keeping since it's a one-line no-downside fix.
+3. Once auth worked, the role still lacked `ecs:DescribeTaskDefinition`, `ecs:RegisterTaskDefinition`
+   (both account-level-only actions, no resource restriction possible — same class of `"*"`
+   exception as Task 47's `ecr:GetAuthorizationToken`), `ecs:DescribeServices`, and `iam:PassRole`
+   on the task execution role. Gave this role its **own** policy instead of reusing
+   `exam-deployer-scoped-policy` — a CI/CD deploy role legitimately needs broader ECS read/write
+   than the human `exam-deployer` user from Task 47, and widening that user's policy would have
+   invalidated the least-privilege proof already captured there.
 
 ### Task 54 — Debug a broken deploy
 Which thing did you break, and exact order of checks used to debug it?
