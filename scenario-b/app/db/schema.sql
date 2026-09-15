@@ -17,3 +17,13 @@ CREATE TABLE tags (
   note_id INT NOT NULL REFERENCES notes(id),
   name TEXT NOT NULL
 );
+
+-- C3 — maps an opaque attachment id to its S3 key + owning tenant, so a
+-- download-url request can be checked against the requester's tenant before
+-- anything gets signed (Task 58).
+CREATE TABLE attachments (
+  id SERIAL PRIMARY KEY,
+  tenant_id INT NOT NULL REFERENCES tenants(id),
+  s3_key TEXT NOT NULL,
+  created_at TIMESTAMP DEFAULT now()
+);

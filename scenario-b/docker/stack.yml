@@ -18,6 +18,12 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:notespass@postgres:5432/notes
       PORT: 3000
+      # C3 - S3 presigned URLs. Real key/secret come from docker/.env (gitignored,
+      # never committed) via docker stack deploy's variable substitution.
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ap-southeast-1
+      S3_BUCKET: ashik-notes-attachments-750069566598
     ports:
       - "8400:3000"
     deploy:

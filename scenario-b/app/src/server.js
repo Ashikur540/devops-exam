@@ -1,7 +1,9 @@
 const os = require('os');
+const crypto = require('crypto');
 const express = require('express');
 const db = require('./db');
 const metrics = require('./metrics');
+const s3 = require('./s3');
 
 const APP_VERSION = process.env.APP_VERSION || 'v1';
 
@@ -30,6 +32,8 @@ const ROUTE_PATTERNS = [
   [/^\/api\/notes$/, '/api/notes'],
   [/^\/api\/search$/, '/api/search'],
   [/^\/api\/stats$/, '/api/stats'],
+  [/^\/api\/attachments\/upload-url$/, '/api/attachments/upload-url'],
+  [/^\/api\/attachments\/[^/]+\/download-url$/, '/api/attachments/:id/download-url'],
 ];
 
 function routeLabel(path) {
@@ -81,6 +85,7 @@ async function tenantMiddleware(req, res, next) {
     const result = await db.query(req, 'tenant_lookup', 'SELECT id FROM tenants WHERE slug=$1', [slug]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'unknown tenant' });
     req.tenantId = result.rows[0].id;
+    req.tenantSlug = slug;
     next();
   } catch (err) {
     res.status(500).json({ error: 'db error' });
@@ -167,6 +172,46 @@ app.get('/api/stats', async (req, res) => {
     [req.tenantId]
   );
   res.json(result.rows[0] || {});
+});
+
+// C3 Task 55 — presigned upload URL. Object always goes under this tenant's
+// own private prefix; the client never gets to pick the key/tenant.
+app.post('/api/attachments/upload-url', async (req, res) => {
+  const filename = (req.body && req.body.filename) || 'file';
+  const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const key = `tenants/${req.tenantSlug}/private/${crypto.randomUUID()}-${safeName}`;
+
+  const result = await db.query(
+    req,
+    'insert_attachment',
+    'INSERT INTO attachments (tenant_id, s3_key) VALUES ($1,$2) RETURNING id',
+    [req.tenantId, key]
+  );
+
+  const uploadUrl = await s3.presignPutUrl(key);
+  res.status(201).json({ id: result.rows[0].id, key, uploadUrl });
+});
+
+// C3 Task 56 — presigned download URL, 60s expiry.
+// C3 Task 58 — tenant isolation happens right here, before anything is
+// signed: look up who actually owns this attachment id and reject a
+// cross-tenant request with a 403 rather than ever generating a URL for it.
+app.get('/api/attachments/:id/download-url', async (req, res) => {
+  const result = await db.query(
+    req,
+    'select_attachment',
+    'SELECT tenant_id, s3_key FROM attachments WHERE id=$1',
+    [req.params.id]
+  );
+  if (result.rows.length === 0) return res.sendStatus(404);
+
+  const attachment = result.rows[0];
+  if (attachment.tenant_id !== req.tenantId) {
+    return res.status(403).json({ error: 'attachment belongs to a different tenant' });
+  }
+
+  const downloadUrl = await s3.presignGetUrl(attachment.s3_key, 60);
+  res.json({ downloadUrl, expiresInSeconds: 60 });
 });
 
 const PORT = process.env.PORT || 3000;
