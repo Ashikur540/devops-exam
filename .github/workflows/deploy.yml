@@ -11,6 +11,9 @@ on:
 permissions:
   contents: read
   packages: write
+  id-token: write # C2 Task 53 - needed so this workflow can get a short-lived
+                  # OIDC token and assume an AWS role, instead of storing an
+                  # AWS access key as a repo secret
 
 concurrency:
   group: deploy-main
@@ -81,3 +84,52 @@ jobs:
             docker service update --image ghcr.io/ashikur540/notes-api:${{ github.sha }} ashik_notes_app
             sleep 15
             docker service ps ashik_notes_app
+
+  # C2 Task 53 - same push, also builds/pushes to ECR and rolls the image out
+  # to the ECS Fargate service, via a short-lived OIDC role (no stored AWS keys).
+  deploy-to-ecs:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ap-southeast-1
+
+      - name: Log in to ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push to ECR
+        working-directory: scenario-b/app
+        run: |
+          docker build -t ${{ steps.login-ecr.outputs.registry }}/ashik-notes-api:${{ github.sha }} .
+          docker push ${{ steps.login-ecr.outputs.registry }}/ashik-notes-api:${{ github.sha }}
+
+      - name: Download current task definition
+        run: |
+          aws ecs describe-task-definition --task-definition ashik-notes-task \
+            --query taskDefinition > task-definition.json
+          jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
+            task-definition.json > task-definition.clean.json
+
+      - name: Render new image into task definition
+        id: render-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.clean.json
+          container-name: app
+          image: ${{ steps.login-ecr.outputs.registry }}/ashik-notes-api:${{ github.sha }}
+
+      - name: Deploy new task definition revision to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render-task-def.outputs.task-definition }}
+          service: ashik-notes-svc
+          cluster: ashik-notes-cluster
+          wait-for-service-stability: true
