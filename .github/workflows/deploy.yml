@@ -1,4 +1,5 @@
 # EXAM_TOKEN: ashik-devops-vmi3536696-1788500224-d4790b52
+# retrigger: AWS_ROLE_ARN variable added, retry deploy-to-ecs
 name: Deploy
 
 on:
