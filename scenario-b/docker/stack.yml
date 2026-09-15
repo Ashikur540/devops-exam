@@ -14,7 +14,7 @@ services:
         condition: on-failure
 
   app:
-    image: ashikur1000/notes-api:v1
+    image: ashikur1000/notes-api:v2
     environment:
       DATABASE_URL: postgresql://postgres:notespass@postgres:5432/notes
       PORT: 3000
