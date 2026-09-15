@@ -138,6 +138,39 @@ that cost nothing until something actually runs on them:
   every commit through GitHub Desktop.
 - Next session: debug the OIDC `AssumeRoleWithWebIdentity` failure, finish Task 53, Task 54
   (break/debug), then C2 final cleanup.
+
+## 2026-09-15 (later still) — Task 53 fixed, Task 54, C2 complete
+
+- Recreated the ALB + ECS service (cluster/task-def/security-groups were kept free from
+  yesterday), then debugged the OIDC failure properly:
+  - Root cause found via `aws cloudtrail lookup-events` on `AssumeRoleWithWebIdentity`: GitHub's
+    real token `sub` claim was `repo:Ashikur540@71774350/devops-exam@1353838435:ref:refs/heads/main`
+    — GitHub appends immutable numeric owner/repo IDs to the subject (this repo or its owner was
+    renamed at some point), not the plain `repo:OWNER/REPO:...` format. Updated the trust policy
+    to the exact value and auth started working.
+  - Two more permission gaps surfaced one at a time as later steps ran: `ecs:DescribeTaskDefinition`
+    + `ecs:RegisterTaskDefinition` (account-level only, no resource restriction possible),
+    then `ecs:DescribeServices`, then needed `iam:PassRole` on the execution role. Gave the CI
+    role its own dedicated policy rather than widening `exam-deployer-scoped-policy` (would have
+    invalidated the Task 47/48 least-privilege evidence).
+  - Pipeline went green end to end: task definition revision 1 → 3, service stable, 2 healthy
+    tasks.
+- Task 54: broke the target group's health check path (`/healthz` → `/health`, a 404 route),
+  watched real failure (`Target.ResponseCodeMismatch`, ECS draining/replacing tasks in a loop),
+  debugged by reading the failure *reason* (rules out a crashed container vs. a config problem),
+  fixed by reverting the path, confirmed both targets healthy again within ~40s.
+- **C2 complete — 36/36 marks.** Deleted the ALB, target group, and ECS service immediately
+  after (kept the free resources — cluster, task definition, security groups, log group, IAM
+  roles/policies — since nothing else in C3/C4 needs them; final full teardown happens at C5
+  Task 63).
+- Also this session: briefly tried switching the authenticated GitHub CLI account to a personal
+  "office" account mid-session for direct push access — the device-flow login kept
+  re-authenticating whichever account the browser used to approve it was already logged into,
+  so it didn't actually switch. Reverted to the original account, which turned out to already
+  have working push/admin access (unclear exactly when that changed) — pushed directly and
+  cancelled a stuck workflow run from this session onward instead of routing through GitHub
+  Desktop.
+- Next: C3 — S3 and file uploads (20 marks).
 - Nothing billable exists yet — safe to leave overnight. Tomorrow: ALB + ECS service (Task 51),
   autoscaling + load test (Task 52), CI/CD extension (Task 53), break/debug (Task 54) — done in
   one sitting, then the ALB/service torn down the same day.
