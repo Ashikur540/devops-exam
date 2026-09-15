@@ -84,3 +84,31 @@
   shared VPS.
 - Task 47 (exam-deployer push proof + `aws s3 ls` AccessDenied) and Task 49 (ECR image tag +
   size) evidence captured and verified.
+
+## 2026-09-14/15 — C2 free setup (no billing yet)
+
+Deliberately split C2 into a free "setup" day and a billable "main work" day, since ALB and
+running Fargate tasks bill per hour with no meaningful free tier. Today only created resources
+that cost nothing until something actually runs on them:
+- ECS cluster `ashik-notes-cluster` (Fargate clusters are free — cost only starts when a task runs).
+- CloudWatch log group `/ecs/ashik-notes`.
+- Confirmed `ecsTaskExecutionRole` already existed in this account (created 2026-09-07, last
+  used in `us-east-1`) — more proof this AWS account is shared with at least one teammate, and
+  that we're naturally isolated from their work by using a different region (`ap-southeast-1`).
+- Default VPC + 3 public subnets (one per AZ) identified for the ALB.
+- Two security groups: `ashik-notes-alb-sg` (port 80 open to the internet) and
+  `ashik-notes-task-sg` (port 3000 open only to the ALB's security group, not the internet).
+- Task definition `ashik-notes-task:1` registered — Postgres and the app as two containers in
+  one Fargate task (`awsvpc` networking, so they talk over `localhost`), 512 CPU / 1024 MB
+  (bumped up from the spec's suggested 256/512, which assumes a separate DB like RDS — ours
+  needs headroom for both containers). Documented the tradeoff in ANSWERS.md.
+- Real problems hit:
+  - Large multi-line heredoc pastes into the VPS SSH session get silently corrupted (dropped
+    characters mid-line) — same class of bug as a B2 incident. Fixed by `scp`-ing the task
+    definition JSON directly from the local machine instead of pasting it, then `sed` to fill
+    in the account ID (kept as `<ACCOUNT_ID>` in the committed file).
+  - `aws ecs register-task-definition`'s JSON output got sent through the CLI's default pager
+    (`less`), which looked like the terminal had hung. Fixed with `export AWS_PAGER=""`.
+- Nothing billable exists yet — safe to leave overnight. Tomorrow: ALB + ECS service (Task 51),
+  autoscaling + load test (Task 52), CI/CD extension (Task 53), break/debug (Task 54) — done in
+  one sitting, then the ALB/service torn down the same day.

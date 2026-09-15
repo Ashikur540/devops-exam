@@ -39,7 +39,15 @@ _(evidence: `evidence/c48-1-policy-simulator.png`)_
 _(evidence: `evidence/c49-1-ecr-tag-size.png` — tag `v1`, 50.48 MB, digest matches the push output)_
 
 ### Task 50 — Task definition
-_(task-def JSON committed with account ID redacted, evidence: running task, CloudWatch logs)_
+_(task-def JSON: `scenario-c/aws/task-definition.json`, account ID redacted as `<ACCOUNT_ID>`;
+registered as `ashik-notes-task:1`. Evidence of a running task + CloudWatch logs comes with
+Task 51, once the ECS service is actually live.)_
+
+Ran Postgres as a second container in the same task instead of RDS (the exam spec explicitly
+allows "just run Postgres in a container"). Because `awsvpc` networking means both containers
+share one network namespace, the app reaches it at `localhost:5432` via `DATABASE_URL`. This
+needed more than the spec's suggested 256 CPU / 512 MB (that number assumes a separate DB), so
+bumped to 512 CPU / 1024 MB — still Fargate's cheapest realistic tier for two containers.
 
 ### Task 51 — Behind ALB
 _(evidence: repeated requests showing different task identities)_
