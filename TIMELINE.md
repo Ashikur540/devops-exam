@@ -109,6 +109,35 @@ that cost nothing until something actually runs on them:
     in the account ID (kept as `<ACCOUNT_ID>` in the committed file).
   - `aws ecs register-task-definition`'s JSON output got sent through the CLI's default pager
     (`less`), which looked like the terminal had hung. Fixed with `export AWS_PAGER=""`.
+
+## 2026-09-15 (later) — Task 53 (partial) + mid-work pause, cleanup
+
+- Task 53: created a GitHub OIDC trust role (`github-actions-ecs-deploy`, reusing the OIDC
+  provider that was already in this shared account) scoped to this repo's `main` branch, reused
+  the `exam-deployer-scoped-policy` on it, and added a `deploy-to-ecs` job to `deploy.yml`.
+- Hit a real stuck-queue repeat of the B5 Task 46 problem: an old approval-gated run from
+  2026-09-11 was still "waiting" 3+ days later and blocking the `deploy-main` concurrency group.
+  Cancelled it manually via the GitHub web UI (same fix as before).
+- `deploy-to-ecs` failed twice with `Not authorized to perform sts:AssumeRoleWithWebIdentity`.
+  First hypothesis: `configure-aws-credentials@v4` tries to tag the session by default, which
+  needs `sts:TagSession` on top of `AssumeRoleWithWebIdentity` — added `role-skip-session-tagging:
+  true` to skip it. Re-ran: **same error, still unresolved.** Left as an open bug to debug next
+  session (candidates not yet checked: IAM propagation delay, an organization-level SCP on this
+  shared account restricting STS actions, or a subtler trust-policy condition mismatch).
+- Mid-session, the user had to step away for work (office) with the ALB + 2 running Fargate
+  tasks from Task 51/52 still live and billing. Per the standing rule for this scenario (don't
+  leave billable-per-hour AWS resources unattended), deleted the ECS service, deregistered the
+  autoscaling target, and deleted the ALB + target group before pausing — kept the free
+  resources (cluster, task definition, security groups, log group, IAM roles/policies) so the
+  next session can rebuild the ALB + service quickly without redoing the IAM/networking setup.
+- Also tried switching the `gh`/git CLI to a different (office) GitHub account mid-session to
+  get direct push access; the device-flow login kept re-authenticating the same old account
+  because the browser used to approve it was already logged into that account. Reverted to the
+  existing account, which turned out to already have working push access (unclear exactly when
+  that changed) — pushed directly from here for the rest of this segment instead of routing
+  every commit through GitHub Desktop.
+- Next session: debug the OIDC `AssumeRoleWithWebIdentity` failure, finish Task 53, Task 54
+  (break/debug), then C2 final cleanup.
 - Nothing billable exists yet — safe to leave overnight. Tomorrow: ALB + ECS service (Task 51),
   autoscaling + load test (Task 52), CI/CD extension (Task 53), break/debug (Task 54) — done in
   one sitting, then the ALB/service torn down the same day.
