@@ -171,6 +171,51 @@ that cost nothing until something actually runs on them:
   cancelled a stuck workflow run from this session onward instead of routing through GitHub
   Desktop.
 - Next: C3 — S3 and file uploads (20 marks).
+
+## 2026-09-15/16 — C3 started, Task 55 working, big deploy debugging saga
+
+Started C3 (S3 attachments). Created a private S3 bucket with public ACLs blocked but the
+bucket-policy block left open on purpose (Task 57 will need a scoped public/ prefix later — no
+point blocking that now just to reopen it in a day or two). Made a dedicated `ashik-notes-app-s3`
+IAM user for the app to generate presigned URLs with, scoped to just that bucket. Added two new
+endpoints to the app (`POST /api/attachments/upload-url`, `GET /api/attachments/:id/download-url`)
+plus an `attachments` table so a download request can be checked against the requester's tenant
+*before* anything gets signed — that check is the whole point of Task 58.
+
+A few real mistakes and a genuinely annoying debugging session along the way, worth recording
+honestly:
+
+- Pasted a real AWS secret access key into the chat by accident (twice, actually) while setting
+  up the app's IAM credentials. Rotated the key both times. Lesson that stuck: write credentials
+  straight to a file on the VPS from a script, never type/paste them through the chat at all.
+- Large multi-command pastes into the VPS SSH session keep corrupting mid-paste (this is now the
+  third time this exact thing has happened across the whole exam). The fix that's actually
+  reliable: one file per paste, nothing chained after it in the same block, and verify immediately
+  after (line count, `node -c`, `python3 -m json.tool`) rather than assuming success.
+- Discovered the Postgres container backing the whole `ashik_notes` Swarm stack had **zero
+  tables** despite running fine for 7 straight days — the app never noticed because `/healthz`
+  doesn't touch the DB and the startup check is just `SELECT 1`, which needs no tables at all.
+  Reloaded schema + seed data properly this time.
+- Then lost well over an hour to what looked like a deployment that silently refused to update.
+  `docker build` kept reporting fresh, non-cached layers, but the running containers kept coming
+  back with the *old* code no matter how many times the image got rebuilt and force-pushed to the
+  Swarm service. Root cause: `docker service update --force --image <tag>` and
+  `docker inspect --format '{{index .RepoDigests 0}}'` were both silently resolving to a stale
+  digest left over from an earlier failed push (Docker Hub auth had quietly expired), not the
+  image that was actually just built. The image's own `Created` timestamp was also misleading —
+  it showed a build from over a week earlier, most likely BuildKit's provenance/attestation
+  feature normalizing timestamps for reproducible builds (the same class of "attestation manifest"
+  issue that broke Swarm scheduling back in B4). What actually worked: `docker login` again,
+  build with `--no-cache`, run the fresh image directly with `docker run --rm <tag> grep ...`
+  to confirm the code *before* touching the registry at all, then push and read the digest
+  straight out of that specific `docker push` command's own output — never trust `docker inspect`
+  or a tag name alone to say what's actually running.
+- Confirmed Task 55 works end to end after all that: presigned PUT URL generated, upload
+  succeeded (HTTP 200), object visible in the S3 console.
+
+Stopped here for the night — verified no ECS services, tasks, or load balancers are running
+(only free resources like the S3 bucket with one tiny test object, and IAM users/policies, are
+left), so nothing is billing per hour overnight. Task 56-58 tomorrow morning, then C4.
 - Nothing billable exists yet — safe to leave overnight. Tomorrow: ALB + ECS service (Task 51),
   autoscaling + load test (Task 52), CI/CD extension (Task 53), break/debug (Task 54) — done in
   one sitting, then the ALB/service torn down the same day.
