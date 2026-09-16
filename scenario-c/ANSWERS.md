@@ -5,6 +5,7 @@ Exam token used in this scenario's screenshots: `PASTE_TOKEN`
 ## C1 — IAM (Tasks 47-48)
 
 ### Task 47 — exam-deployer policy
+
 _(policy JSON: `scenario-c/aws/exam-deployer-policy.json`, evidence: `evidence/c47-1-push-success-terminal.png`, `evidence/c47-2-denied-s3.png`)_
 Where you used `"*"`, note why here:
 
@@ -23,6 +24,7 @@ policy version and the push then completed. Documented here instead of just sile
 since the AWS docs being incomplete for this is a genuine gotcha worth recording.
 
 ### Task 48 — Policy simulator
+
 _(evidence: `evidence/c48-1-policy-simulator.png`)_
 4 actions tested (2 allow, 2 deny) — results:
 
@@ -36,9 +38,11 @@ _(evidence: `evidence/c48-1-policy-simulator.png`)_
 ## C2 — ECS deployment (Tasks 49-54)
 
 ### Task 49 — Push to ECR
+
 _(evidence: `evidence/c49-1-ecr-tag-size.png` — tag `v1`, 50.48 MB, digest matches the push output)_
 
 ### Task 50 — Task definition
+
 _(task-def JSON: `scenario-c/aws/task-definition.json`, account ID redacted as `<ACCOUNT_ID>`;
 registered as `ashik-notes-task:1`. Evidence of a running task + CloudWatch logs comes with
 Task 51, once the ECS service is actually live.)_
@@ -50,11 +54,13 @@ needed more than the spec's suggested 256 CPU / 512 MB (that number assumes a se
 bumped to 512 CPU / 1024 MB — still Fargate's cheapest realistic tier for two containers.
 
 ### Task 51 — Behind ALB
+
 _(evidence: `c51-1-different-tasks.png` — 10 requests to the ALB's `/healthz` alternate between
 two `X-Served-By` hostnames, `ip-172-31-27-75...` and `ip-172-31-15-26...`, proving round-robin
 across two different Fargate tasks)_
 
 ### Task 52 — Autoscaling
+
 _(evidence: `c52-1-scaling-policy.png`, `c52-2-scale-out-count.png`, `c52-3-scale-out-events.png`,
 `c52-4-cpu-graph.png`, `c52-5-load-test-summary.png`)_
 
@@ -62,6 +68,7 @@ Time from CPU going high to a new task actually serving traffic — add up metri
 
 > Real timestamps from this run (`hey -z 5m -c 50` against `/api/search?q=abc`, an unindexed
 > LIKE query over 50k seeded notes):
+>
 > - Load test started: 03:33:13
 > - ECS actually changed desired count 2 → 4 ("Setting desired count to 4"): ~03:38-03:39
 >   (~5-6 min later — CloudWatch metric delay + the target-tracking alarm needing a few
@@ -71,7 +78,7 @@ Time from CPU going high to a new task actually serving traffic — add up metri
 >   group's health check before it gets real traffic)
 > - **Total: ~9 minutes** from the CPU spike starting to a new task actually serving requests.
 >
-> This is why autoscaling cannot save you from a *sudden* spike: a spike shorter than ~9 minutes
+> This is why autoscaling cannot save you from a _sudden_ spike: a spike shorter than ~9 minutes
 > is already over (or has already caused timeouts/errors) before any new capacity exists.
 > Autoscaling helps with sustained or gradually-growing load, not a flash traffic burst — for
 > that you need pre-provisioned headroom (a higher min-capacity) or backpressure/a queue in
@@ -84,6 +91,7 @@ Time from CPU going high to a new task actually serving traffic — add up metri
 > deliberately conservative about scaling in, to avoid flapping if load is just briefly dipping.
 
 ### Task 53 — Deploy from CI/CD
+
 _(evidence: `c53-1-pipeline-success.png`, `c53-2-new-task-def-revision.png` (revision 1 → 3),
 `c53-3-trust-policy-repo-condition.png`. Policies: `scenario-c/aws/github-actions-oidc-trust-policy.json`,
 `scenario-c/aws/github-actions-ecs-deploy-policy.json`)_
@@ -94,7 +102,7 @@ branch. Real bugs hit getting this working:
 
 1. **`Not authorized to perform sts:AssumeRoleWithWebIdentity`** even with the role's `sub`
    condition looking correct. Root cause found via CloudTrail (`aws cloudtrail lookup-events
-   --lookup-attributes AttributeKey=EventName,AttributeValue=AssumeRoleWithWebIdentity`): GitHub's
+--lookup-attributes AttributeKey=EventName,AttributeValue=AssumeRoleWithWebIdentity`): GitHub's
    actual token `sub` claim was `repo:Ashikur540@71774350/devops-exam@1353838435:ref:refs/heads/main`
    — GitHub appends stable numeric owner/repo IDs to the subject claim (likely because this
    repo/owner was renamed at some point), not the plain `repo:OWNER/REPO:ref:...` format most
@@ -111,6 +119,7 @@ branch. Real bugs hit getting this working:
    invalidated the least-privilege proof already captured there.
 
 ### Task 54 — Debug a broken deploy
+
 _(evidence: `c54-1-break-command.png`, `c54-2-failure-state.png`, `c54-4-fixed-state.png`)_
 
 Which thing did you break, and exact order of checks used to debug it?
@@ -119,12 +128,13 @@ Which thing did you break, and exact order of checks used to debug it?
 > (a route that doesn't exist — the app returns 404 for it) via `aws elbv2 modify-target-group`.
 >
 > **Order of checks used to debug:**
+>
 > 1. `curl` the ALB directly — still got occasional 200s during the transition, so the app itself
 >    wasn't down; pointed at something between the ALB and the app, not the app crashing.
 > 2. `aws elbv2 describe-target-health` — showed both real targets `unhealthy` with reason
 >    `Target.ResponseCodeMismatch`, and ECS already `draining` and replacing them (visible in the
 >    ECS service's Events tab too). `ResponseCodeMismatch` specifically means the health check
->    *is* reaching the container and getting a response, just not the expected `200` — that
+>    _is_ reaching the container and getting a response, just not the expected `200` — that
 >    narrows it to "wrong health check config", not "container isn't listening" or "container
 >    crashed" (which would show `Target.FailedHealthChecks` / connection-refused reasons instead).
 > 3. `aws elbv2 describe-target-groups` on that target group — read back `HealthCheckPath` and
@@ -142,18 +152,59 @@ Which thing did you break, and exact order of checks used to debug it?
 ## C3 — S3 (Tasks 55-58)
 
 ### Task 55 — Private bucket + presigned upload
-_(evidence: presigned URL, successful upload, object in console)_
+
+_(evidence: `evidence/c55-1-upload-success.png` — presigned URL generated for
+`tenants/acme/private/<uuid>-myfile.png`, `curl -X PUT` upload returns HTTP 200. No separate
+S3-console screenshot of the object — see `INCOMPLETE.md`.)_
+
+Bucket created with `BlockPublicAcls`/`IgnorePublicAcls` on but `BlockPublicPolicy`/
+`RestrictPublicBuckets` deliberately left off — Task 57 needs a scoped bucket *policy* to make
+`public/*` readable later, and there was no point blocking that now just to reopen it. The app
+uses a dedicated `ashik-notes-app-s3` IAM user (deleted at final cleanup) scoped to only
+`s3:GetObject`/`s3:PutObject` on this one bucket to generate the presigned URLs — see
+`scenario-c/ANSWERS.md` note in TIMELINE.md for the reasoning that tenant isolation is enforced
+in app code (Task 58), not via IAM per-tenant scoping.
 
 ### Task 56 — Presigned download + expiry
-_(evidence: works within 60s, S3 XML error after expiry, AccessDenied without presigning)_
+
+_(endpoint built and deployed — `GET /api/attachments/:id/download-url`, 60s presigned GET —
+but the curl proof was never run. Not attempted due to running out of session time; see
+`INCOMPLETE.md`.)_
+
 If a presigned URL leaks in a public group — what can strangers do, for how long? Two ways to reduce the risk, and which you'd actually implement:
 
-> 
+> A stranger with the URL can `GET` (download) that **one specific file**, read-only, until the
+> signature expires — at most 60 seconds from when the app generated it (not from when it was
+> shared, so realistically often less by the time someone clicks it in a busy group chat). They
+> get nothing else: not other files, not write access, not a reusable credential.
+>
+> Two ways to reduce the risk:
+> 1. **Shorten the expiry further** (e.g. 10-15s) — narrows the window, but doesn't eliminate
+>    it, and too short breaks the legitimate case where a slow connection or a user who reads
+>    the chat a minute late can't open it either.
+> 2. **Make it single-use at the app layer** — track a `used_at` timestamp on the `attachments`
+>    row, set the first time the file is actually fetched (e.g. via a CloudFront/app-side
+>    redirect that checks-then-presigns rather than handing out the raw S3 URL directly), and
+>    refuse to serve it again even within the expiry window.
+>
+> I'd actually implement **#2**, not IP-binding (a third option, but brittle — mobile networks
+> and corporate NATs change source IP mid-session, causing false failures for the real user).
+> Single-use directly matches the threat model in this question: it doesn't matter how long the
+> URL stays technically valid if the first person to click it (legitimate or not) consumes it.
 
 ### Task 57 — Public vs private prefixes
-_(evidence: public/ works plain, private/ AccessDenied plain, private/ works presigned)_
+
+_(not attempted — the bucket's public-access-block settings were already configured with this
+task in mind (`BlockPublicPolicy`/`RestrictPublicBuckets` left off), but the actual
+`put-bucket-policy` call and the 3 proofs were never done. See `INCOMPLETE.md`.)_
 
 ### Task 58 — Tenant isolation on presign
+
+_(the tenant-ownership check itself is implemented and deployed — see
+`GET /api/attachments/:id/download-url` in `scenario-b/app/src/server.js`, which looks up the
+attachment's real `tenant_id` and returns 403 on any mismatch before ever calling `presignGetUrl`
+— but the actual cross-tenant curl proof was never run. See `INCOMPLETE.md`.)_
+
 _(evidence: acme requesting globex's key → 403)_
 
 ---
@@ -163,42 +214,60 @@ _(evidence: acme requesting globex's key → 403)_
 Domain used: `PASTE_DOMAIN` (real domain / DuckDNS / nip.io / `/etc/hosts` simulation — state which)
 
 ### Task 59 — Wildcard DNS + Host routing
-_(evidence: acme vs globex different notes, unknown subdomain clean 404, one app instance serving all)_
+
+_(evidence: acme vs `globex` different notes, unknown subdomain clean 404, one app instance serving all)_
 
 ### Task 60 — Automatic tenant provisioning
+
 _(evidence: one terminal session — create tenant, curl new subdomain immediately works)_
 Why no DNS/nginx change needed?
 
-> 
+>
 
 Slug validation — reserved names blocklist (www/api/admin/etc), dots rejected — evidence of one rejection:
 
-> 
+>
 
 ### Task 61 — Custom domain (BYO domain)
+
 Which did you do — real second domain, or other? State clearly:
 
-> 
+>
 
 ### Task 62 — What can go wrong
+
 1. Customer points DNS before verifying — what does a visitor see right now, is that OK, how did you fix it (proper "not configured" page)?
 
-> 
+>
 
 2. Two tenants claim the same custom domain — what stops the second one (DB constraint / app check)? Show the error.
 
-> 
+>
 
 3. Faked `X-Tenant` header — does `curl -H "X-Tenant: globex" http://acme.yourdomain.com/...` leak globex's data? Fix (nginx must overwrite, never pass through client header) and show fixed.
 
-> 
+>
 
 4. One more isolation bug found in your own code — what and where:
 
-> 
+>
 
 ---
 
 ## C5 — Cleanup (Task 63)
 
-_(evidence: resource listing commands showing nothing left, Billing/Cost Explorer screenshot)_
+Deleted everything created for Scenario C: the S3 bucket (and its one test object), the ECR
+repo, the ECS cluster and task definition, the CloudWatch log group, both security groups, and
+all 3 IAM identities created for this scenario (`exam-deployer` user+policy,
+`github-actions-ecs-deploy` role+policy, `ashik-notes-app-s3` user+policy). Deliberately left
+untouched: `ecsTaskExecutionRole` (pre-existing in this shared account since before this exam,
+another student may depend on it), the default VPC, the GitHub OIDC provider (also pre-existing
+and shared), and this account's own `ashik` login.
+
+Verified via `aws ecs list-clusters`, `aws elbv2 describe-load-balancers`, `aws s3 ls`,
+`aws ec2 describe-instances` (all empty) plus `aws iam list-users`/`list-roles` — confirmed none
+of the 3 identities above remain, while other students' resources in this shared account
+(`badhon`, `alamin`, `faruq`, etc.) were left alone. This was run for real, but not
+screenshotted — see `INCOMPLETE.md`. Billing/Cost Explorer screenshot also not captured (IAM
+user billing-console access needs a separate permission grant from the account owner, never
+followed up on — see TIMELINE.md, 2026-09-11).

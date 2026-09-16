@@ -1,20 +1,20 @@
-# DevOps Practical Exam — [Your Name]
+# DevOps Practical Exam — Ashikur Rahman
 
-**Exam token:** `PASTE_YOUR_EXAM_TOKEN_HERE`
-*(generate on your VPS — see "Your exam token" section in question.md, then paste it here)*
+**Exam token:** `ashik-devops-vmi3536696-1788500224-d4790b52`
 
-**Server IP:** `PASTE_VPS_IP_HERE`
+**Server IP:** `169.58.246.108`
 
 ## What's hosted where
 
 | What | Link / address |
 | --- | --- |
-| App (direct) | http://SERVER_IP:PORT |
-| App (via nginx) | http://SERVER_IP |
-| Grafana | http://SERVER_IP:3001 |
-| Prometheus | http://SERVER_IP:9090 |
-| ALB (Scenario C) | http://ALB_DNS_NAME |
-| Wildcard domain (Scenario C4) | http://acme.yourdomain.com |
+| App (direct, Docker Compose) | http://169.58.246.108:8300 |
+| App (via Swarm, `ashik_notes` stack) | http://169.58.246.108:8400 |
+| App (via nginx reverse proxy, Scenario A5) | http://169.58.246.108 |
+| Grafana | http://169.58.246.108:3390 |
+| Prometheus | http://169.58.246.108:9390 |
+| ALB / ECS (Scenario C2) | torn down after Tasks 49-54 evidence was captured, to avoid per-hour AWS cost — see `scenario-c/evidence/` for screenshots while it was live |
+| Wildcard domain (Scenario C4) | not reached this submission — see `INCOMPLETE.md` |
 
 ## Repo layout
 
